@@ -1,3 +1,11 @@
+[Ejercicio 06]
+- Armado de las interfaces gráficas del sistema (consola) para operar con los CRUD de cada clase.
+- Se incorporó Pydantic para validar y estructurar los datos ingresados desde la interfaz de consola.
+- Se agregaron modelos de entrada en `schemas.py`.
+- Se mantuvieron las entidades de dominio como clases POO con encapsulamiento mediante atributos privados y properties.
+- Se integraron las validaciones de Pydantic con los servicios existentes sin alterar la lógica de negocio.
+- Se realizaron pruebas de validación e integración de la consola.
+
 [Ejercicio 05]
 - Creación de archivos CSV dentro de `migrations/csv` con un mínimo de 10 registros por entidad.
 - Implementación del script de importación de datos en `preload_data.py`.
