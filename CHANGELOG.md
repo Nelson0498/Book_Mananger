@@ -1,3 +1,7 @@
+[Ejercicio 04]
+- Implementación de la capa de servicios para la lógica de negocio.
+- Orquestación de operaciones entre las entidades y los repositorios.
+
 [Ejercicio 03]
 - Implementación de repositorios para la persistencia de datos.
 - Desarrollo de métodos CRUD completos (Create, Read, Update, Delete) para cada entidad.
