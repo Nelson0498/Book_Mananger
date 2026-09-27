@@ -1,3 +1,7 @@
+[Ejercicio 05]
+- Creación de archivos CSV dentro de `migrations/csv` con un mínimo de 10 registros por entidad.
+- Implementación del script de importación de datos en `preload_data.py`.
+
 [Ejercicio 04]
 - Implementación de la capa de servicios para la lógica de negocio.
 - Orquestación de operaciones entre las entidades y los repositorios.
