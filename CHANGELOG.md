@@ -1,3 +1,7 @@
+[Ejercicio 07]
+- Creación del archivo `main.py` como punto de entrada principal.
+- Configuración de la ejecución del sistema y orquestación de la aplicación.
+
 [Ejercicio 06]
 - Armado de las interfaces gráficas del sistema (consola) para operar con los CRUD de cada clase.
 - Se incorporó Pydantic para validar y estructurar los datos ingresados desde la interfaz de consola.
