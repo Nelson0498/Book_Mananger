@@ -29,7 +29,7 @@ from book_manager.preload_data.preload_data import cargar_datos_iniciales
 from book_manager.ui.console import Consola
 
 
-def main() -> None:
+def main(import_default_data: bool = True) -> None:
     """Ensambla el sistema y ejecuta la consola."""
 
     # ------------------------------------------------------------------
