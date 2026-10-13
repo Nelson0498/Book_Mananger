@@ -166,7 +166,19 @@ class _AlmacenCSV:
     """
 
     def __init__(self, ruta_csv: str, encabezados: List[str]) -> None:
-        self._ruta_csv = ruta_csv
+        # Raíz del repositorio: repositories/ -> book_manager/ -> src/ -> raíz.
+        raiz_proyecto = os.path.abspath(
+            os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                         "..", "..", "..")
+        )
+
+        if os.path.isabs(ruta_csv):
+            self._ruta_csv = ruta_csv
+        else:
+            self._ruta_csv = os.path.normpath(
+                os.path.join(raiz_proyecto, ruta_csv)
+            )
+
         self._encabezados = encabezados
         self._asegurar_archivo()
 
@@ -253,7 +265,7 @@ class RepositorioGenero(RepositorioCSV[Genero]):
 
     def __init__(
         self,
-        ruta_csv: str = "book_manager/migrations/csv/generos.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/generos.csv",
     ) -> None:
         super().__init__(ruta_csv, encabezados=["id", "nombre"])
 
@@ -269,7 +281,7 @@ class RepositorioEditorial(RepositorioCSV[Editorial]):
 
     def __init__(
         self,
-        ruta_csv: str = "book_manager/migrations/csv/editoriales.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/editoriales.csv",
     ) -> None:
         super().__init__(ruta_csv, encabezados=["id", "nombre", "pais"])
 
@@ -293,7 +305,7 @@ class RepositorioMoneda(RepositorioCSV[Moneda]):
 
     def __init__(
         self,
-        ruta_csv: str = "book_manager/migrations/csv/monedas.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/monedas.csv",
     ) -> None:
         super().__init__(
             ruta_csv, encabezados=["id", "codigo", "nombre", "simbolo"]
@@ -321,7 +333,7 @@ class RepositorioTipoCotizacion(RepositorioCSV[TipoCotizacion]):
 
     def __init__(
         self,
-        ruta_csv: str = "book_manager/migrations/csv/tipos_cotizacion.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/tipos_cotizacion.csv",
     ) -> None:
         super().__init__(ruta_csv, encabezados=["id", "nombre"])
 
@@ -348,7 +360,7 @@ class RepositorioPrecio(RepositorioCSV[Precio]):
     def __init__(
         self,
         repositorio_moneda: RepositorioMoneda,
-        ruta_csv: str = "book_manager/migrations/csv/precios.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/precios.csv",
     ) -> None:
         super().__init__(
             ruta_csv, encabezados=["id", "valor", "moneda_id"]
@@ -394,7 +406,7 @@ class RepositorioLibro(_AlmacenCSV, IRepositorioLibro):
         repositorio_editorial: RepositorioEditorial,
         repositorio_precio: RepositorioPrecio,
         repositorio_stock: "RepositorioStock",
-        ruta_csv: str = "book_manager/migrations/csv/libros.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/libros.csv",
     ) -> None:
         super().__init__(
             ruta_csv,
@@ -509,7 +521,7 @@ class RepositorioStock(_AlmacenCSV, IRepositorioStock):
 
     def __init__(
         self,
-        ruta_csv: str = "book_manager/migrations/csv/stock.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/stock.csv",
     ) -> None:
         super().__init__(
             ruta_csv,
@@ -591,7 +603,7 @@ class RepositorioCotizacionDolar(_AlmacenCSV, IRepositorioCotizacionDolar):
     def __init__(
         self,
         repositorio_tipo_cotizacion: RepositorioTipoCotizacion,
-        ruta_csv: str = "book_manager/migrations/csv/cotizaciones.csv",
+        ruta_csv: str = "src/book_manager/migrations/csv/cotizaciones.csv",
     ) -> None:
         super().__init__(
             ruta_csv,
