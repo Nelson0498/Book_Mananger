@@ -7,6 +7,7 @@ exports/
 *.egg-info/
 .ipynb_checkpoints/
 tests/.temporal/
+tests/
 
 # Copia auxiliar del notebook con la corrección de seguridad. El notebook
 # definitivo se entrega por el aula virtual y no se versiona acá.
