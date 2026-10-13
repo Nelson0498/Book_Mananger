@@ -1,19 +1,24 @@
 """
-Punto de entrada del sistema Book Manager – Sprint 1.
+Punto de entrada del sistema Book Manager – Sprint 2.
 
-Ensambla repositorios, servicios, carga datos iniciales y
-lanza la interfaz de consola.
+Ensambla la conexión a la base de datos, la migración de los datos iniciales,
+los repositorios SQLAlchemy, los servicios y lanza la interfaz de consola.
 """
 
+from book_manager.database.connection import ConexionDB
+from book_manager.migrations.migrations import (
+    crear_tablas,
+    migrar_base_de_datos,
+)
 from book_manager.repositories.repositories import (
-    RepositorioCotizacionDolar,
-    RepositorioEditorial,
-    RepositorioGenero,
-    RepositorioLibro,
-    RepositorioMoneda,
-    RepositorioPrecio,
-    RepositorioStock,
-    RepositorioTipoCotizacion,
+    RepositorioCotizacionDolarSQLAlchemy,
+    RepositorioEditorialSQLAlchemy,
+    RepositorioGeneroSQLAlchemy,
+    RepositorioLibroSQLAlchemy,
+    RepositorioMonedaSQLAlchemy,
+    RepositorioPrecioSQLAlchemy,
+    RepositorioStockSQLAlchemy,
+    RepositorioTipoCotizacionSQLAlchemy,
 )
 from book_manager.services.services import (
     ServicioCotizacionDolar,
@@ -25,39 +30,56 @@ from book_manager.services.services import (
     ServicioStock,
     ServicioTipoCotizacion,
 )
-from book_manager.preload_data.preload_data import cargar_datos_iniciales
 from book_manager.ui.console import Consola
 
 
 def main(import_default_data: bool = True) -> None:
-    """Ensambla el sistema y ejecuta la consola."""
+    """Ensambla el sistema y ejecuta la consola.
+
+    Args:
+        import_default_data (bool): Si es True, asegura el esquema y ejecuta la
+            migración de los datos del Sprint 1 (archivos CSV) a la base de
+            datos. Si es False, no se importa ningún registro: únicamente se
+            asegura de que las tablas existan, para que el sistema opere sobre
+            los datos ya cargados en la base.
+    """
+    conexion = ConexionDB()
+
+    try:
+        _ejecutar_sistema(conexion, import_default_data)
+    finally:
+        # Se libera el motor aunque falle la migración, la construcción de los
+        # servicios o la ejecución de la consola.
+        conexion.cerrar()
+
+
+def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
+    """Asegura el esquema, arma los servicios y ejecuta la consola.
+
+    Args:
+        conexion (ConexionDB): Conexión a la base de datos, ya creada.
+        import_default_data (bool): Si es True, ejecuta la migración de datos.
+    """
 
     # ------------------------------------------------------------------
-    # 1. Repositorios
+    # 1. Esquema y datos iniciales
     # ------------------------------------------------------------------
-    repo_genero = RepositorioGenero()
-    repo_editorial = RepositorioEditorial()
-    repo_moneda = RepositorioMoneda()
-    repo_tipo_cotizacion = RepositorioTipoCotizacion()
-    repo_precio = RepositorioPrecio(repositorio_moneda=repo_moneda)
-    repo_stock = RepositorioStock()
-    repo_libro = RepositorioLibro(
-        repositorio_genero=repo_genero,
-        repositorio_editorial=repo_editorial,
-        repositorio_precio=repo_precio,
-        repositorio_stock=repo_stock,
-    )
-    repo_cotizacion = RepositorioCotizacionDolar(
-        repositorio_tipo_cotizacion=repo_tipo_cotizacion,
-    )
+    if import_default_data:
+        migrar_base_de_datos(conexion)
+    else:
+        crear_tablas(conexion)
 
     # ------------------------------------------------------------------
-    # 2. Carga de datos iniciales
+    # 2. Repositorios
     # ------------------------------------------------------------------
-    cargar_datos_iniciales(
-        repo_genero, repo_editorial, repo_moneda, repo_tipo_cotizacion,
-        repo_precio, repo_stock, repo_libro, repo_cotizacion,
-    )
+    repo_genero = RepositorioGeneroSQLAlchemy(conexion)
+    repo_editorial = RepositorioEditorialSQLAlchemy(conexion)
+    repo_moneda = RepositorioMonedaSQLAlchemy(conexion)
+    repo_tipo_cotizacion = RepositorioTipoCotizacionSQLAlchemy(conexion)
+    repo_precio = RepositorioPrecioSQLAlchemy(conexion)
+    repo_stock = RepositorioStockSQLAlchemy(conexion)
+    repo_libro = RepositorioLibroSQLAlchemy(conexion)
+    repo_cotizacion = RepositorioCotizacionDolarSQLAlchemy(conexion)
 
     # ------------------------------------------------------------------
     # 3. Servicios
@@ -91,6 +113,7 @@ def main(import_default_data: bool = True) -> None:
         svc_libro=svc_libro,
         svc_cotizacion=svc_cotizacion,
     )
+
     consola.ejecutar()
 
 

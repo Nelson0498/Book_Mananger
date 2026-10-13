@@ -7,9 +7,12 @@ los servicios; la consola solo se encarga de pedir datos al
 usuario, llamar al servicio correspondiente y mostrar resultados.
 """
 
+import csv
 import datetime
+import os
 from typing import Optional
 
+from book_manager.entities.entities import CotizacionDolar
 from book_manager.services.services import (
     EntidadNoEncontradaError,
     ErrorServicio,
@@ -22,6 +25,7 @@ from book_manager.services.services import (
     ServicioPrecio,
     ServicioStock,
     ServicioTipoCotizacion,
+    TIPO_COTIZACION_OFICIAL,
 )
 from pydantic import ValidationError
 from book_manager.schemas.schemas import (
@@ -48,6 +52,16 @@ from book_manager.schemas.schemas import (
 # ---------------------------------------------------------------------------
 # Helpers de entrada
 # ---------------------------------------------------------------------------
+
+# Raíz del proyecto: ui/ -> book_manager/ -> src/ -> raíz.
+_RAIZ_PROYECTO = os.path.abspath(
+    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
+)
+
+# Carpeta donde se guardan los archivos generados por la aplicación.
+# Está excluida de Git mediante .gitignore.
+CARPETA_EXPORTACION_POR_DEFECTO = os.path.join(_RAIZ_PROYECTO, "exports")
+
 
 def pedir_entero(mensaje: str) -> int:
     """Pide al usuario un número entero, reintentando ante errores."""
@@ -156,11 +170,14 @@ class Consola:
             print("  6. Stock")
             print("  7. Tipos de Cotización")
             print("  8. Cotizaciones del Dólar")
+            print("  9. Obtener cotizaciones por API")
+            print(" 10. Lista de precios bimonetaria")
+            print(" 11. Exportar precios a CSV")
             print("  0. Salir")
 
             opcion = pedir_opcion(
                 "\n  Seleccione una opción: ",
-                ["0", "1", "2", "3", "4", "5", "6", "7", "8"],
+                ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
             )
 
             if opcion == "1":
@@ -179,6 +196,17 @@ class Consola:
                 self._menu_tipos_cotizacion()
             elif opcion == "8":
                 self._menu_cotizaciones()
+            elif opcion in ("9", "10", "11"):
+                try:
+                    if opcion == "9":
+                        self._obtener_cotizaciones_api()
+                    elif opcion == "10":
+                        self._lista_precios_bimonetaria()
+                    else:
+                        self._exportar_precios_csv()
+                except (ErrorServicio, ValidationError, ValueError) as e:
+                    print(f"\n  Error: {e}")
+                pausar()
             elif opcion == "0":
                 print("\n  ¡Hasta luego!")
                 break
@@ -980,3 +1008,99 @@ class Consola:
             print("\n  Cotización eliminada correctamente.")
         else:
             print("\n  No se encontró cotización para ese tipo y fecha.")
+
+    # ==================================================================
+    # Reportes del Sprint 2
+    # ==================================================================
+
+    def _obtener_cotizaciones_api(self) -> None:
+        """Consulta la API del dólar y registra las cotizaciones obtenidas."""
+        print("\n  --- Obtener Cotizaciones por API ---")
+        cotizaciones = self._svc_cotizacion.obtener_cotizaciones()
+
+        print(f"\n  Cotizaciones registradas: {len(cotizaciones)}")
+        for c in sorted(cotizaciones, key=lambda x: x.tipo.id_tipo):
+            print(f"    {c.tipo.nombre:<12} compra {c.valor_compra:>10.2f}"
+                  f" | venta {c.valor_venta:>10.2f} | {c.fecha}")
+
+        print("\n  Si un tipo ya tenía cotización para esa fecha, se actualizó"
+              " en lugar de duplicarse.")
+
+    def _cotizacion_oficial(self) -> CotizacionDolar:
+        """Devuelve la cotización Oficial vigente que usan los reportes."""
+        return self._svc_cotizacion.obtener_vigente_por_nombre(
+            TIPO_COTIZACION_OFICIAL
+        )
+
+    def _lista_precios_bimonetaria(self) -> None:
+        """Muestra los precios del catálogo en pesos y en otra moneda."""
+        print("\n  --- Lista de Precios Bimonetaria ---")
+        print("  Monedas disponibles:")
+        for m in self._svc_moneda.listar():
+            print(f"    {m.codigo} – {m.nombre}")
+
+        codigo = pedir_texto(
+            "  Código de la moneda a la que convertir: "
+        ).upper()
+
+        cotizacion = self._cotizacion_oficial()
+        print(f"\n  Cotización utilizada: {cotizacion.tipo.nombre}, "
+              f"valor de venta {cotizacion.valor_venta:.2f} "
+              f"({cotizacion.fecha})")
+
+        if codigo not in ("ARS", "USD"):
+            print(f"  Aviso: no hay cotización real para {codigo}, los valores"
+                  " se muestran como no disponibles en lugar de inventarlos.")
+
+        print(f"\n  {'ISBN':<20} {'Título':<28} {'Origen':>16}"
+              f" | {'Convertido':>18}")
+        for fila in self._svc_libro.listar_precios_bimonetarios(
+            cotizacion, codigo
+        ):
+            if fila.valor_destino is None:
+                convertido = f"{fila.moneda_destino}: no disponible"
+            else:
+                convertido = (
+                    f"{fila.valor_destino:>10.2f} {fila.moneda_destino}"
+                )
+            print(f"  {fila.libro.isbn:<20} {fila.libro.titulo[:28]:<28}"
+                  f" {fila.valor_origen:>10.2f} {fila.moneda_origen:<4}"
+                  f" | {convertido:>18}")
+
+    def _exportar_precios_csv(self) -> None:
+        """Exporta los precios de todos los libros en todas las monedas."""
+        print("\n  --- Exportar Precios a CSV ---")
+
+        codigos = [m.codigo for m in self._svc_moneda.listar()]
+        cotizacion = self._cotizacion_oficial()
+        filas = self._svc_libro.listar_precios_multimonetarios(
+            cotizacion, codigos
+        )
+
+        os.makedirs(CARPETA_EXPORTACION_POR_DEFECTO, exist_ok=True)
+        nombre = f"precios_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv"
+        ruta = os.path.join(CARPETA_EXPORTACION_POR_DEFECTO, nombre)
+
+        with open(ruta, mode="w", newline="", encoding="utf-8") as archivo:
+            escritor = csv.writer(archivo)
+            escritor.writerow(
+                ["isbn", "titulo", "moneda_origen", "valor_origen", *codigos]
+            )
+            for libro, valores in filas:
+                escritor.writerow([
+                    libro.isbn,
+                    libro.titulo,
+                    libro.precio.moneda.codigo,
+                    f"{libro.precio.valor:.2f}",
+                    *[
+                        "" if valores[codigo] is None
+                        else f"{valores[codigo]:.2f}"
+                        for codigo in codigos
+                    ],
+                ])
+
+        print(f"\n  Archivo generado: {ruta}")
+        print(f"  {len(filas)} libros exportados en {len(codigos)} monedas.")
+        print(f"  Cotización usada: {cotizacion.tipo.nombre} "
+              f"(valor de venta {cotizacion.valor_venta:.2f}).")
+        print("  Las monedas sin cotización real se exportan vacías.")

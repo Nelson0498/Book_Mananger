@@ -90,6 +90,10 @@ class Moneda(EntidadBase):
 
     @nombre.setter
     def nombre(self, valor: str) -> None:
+        # Se rechazan la cadena vacía y las formadas únicamente por espacios.
+        # El valor almacenado no se modifica: solo se usa para validar.
+        if not valor or not valor.strip():
+            raise ValueError("El nombre de la moneda no puede estar vacío")
         self.__nombre = valor
 
     @property
@@ -98,6 +102,10 @@ class Moneda(EntidadBase):
 
     @simbolo.setter
     def simbolo(self, valor: str) -> None:
+        # Se rechazan la cadena vacía y las formadas únicamente por espacios.
+        # El valor almacenado no se modifica: solo se usa para validar.
+        if not valor or not valor.strip():
+            raise ValueError("El símbolo de la moneda no puede estar vacío")
         self.__simbolo = valor
 
     def __str__(self) -> str:
@@ -212,6 +220,10 @@ class Precio(EntidadBase):
 
     @moneda.setter
     def moneda(self, nueva_moneda: Moneda) -> None:
+        if not isinstance(nueva_moneda, Moneda):
+            raise ValueError(
+                "La moneda del precio debe ser una instancia de Moneda"
+            )
         self.__moneda = nueva_moneda
 
     def __str__(self) -> str:
@@ -246,6 +258,10 @@ class Stock(EntidadBase):
 
     @libro_isbn.setter
     def libro_isbn(self, valor: str) -> None:
+        # Se rechazan la cadena vacía y las formadas únicamente por espacios.
+        # El valor almacenado no se modifica: solo se usa para validar.
+        if not valor or not valor.strip():
+            raise ValueError("El ISBN del libro no puede estar vacío")
         self.__libro_isbn = valor
 
     @property
@@ -264,6 +280,10 @@ class Stock(EntidadBase):
 
     @cantidad_minima.setter
     def cantidad_minima(self, valor: int) -> None:
+        # Validación de dominio: el umbral de reposición no puede ser negativo.
+        # No se replica como restricción SQL para no modificar el modelo de datos.
+        if valor < 0:
+            raise ValueError("La cantidad mínima no puede ser negativa")
         self.__cantidad_minima = valor
 
     def hay_stock_bajo(self) -> bool:
@@ -371,6 +391,10 @@ class Libro:
 
     @autor.setter
     def autor(self, valor: str) -> None:
+        # Se rechazan la cadena vacía y las formadas únicamente por espacios.
+        # El valor almacenado no se modifica: solo se usa para validar.
+        if not valor or not valor.strip():
+            raise ValueError("El autor no puede estar vacío")
         self.__autor = valor
 
     @property
@@ -379,6 +403,8 @@ class Libro:
 
     @editorial.setter
     def editorial(self, valor: Editorial) -> None:
+        if not isinstance(valor, Editorial):
+            raise ValueError("La editorial debe ser una instancia de Editorial")
         self.__editorial = valor
 
     @property
@@ -387,6 +413,8 @@ class Libro:
 
     @genero.setter
     def genero(self, valor: Genero) -> None:
+        if not isinstance(valor, Genero):
+            raise ValueError("El género debe ser una instancia de Genero")
         self.__genero = valor
 
     @property
@@ -395,6 +423,8 @@ class Libro:
 
     @precio.setter
     def precio(self, valor: Precio) -> None:
+        if not isinstance(valor, Precio):
+            raise ValueError("El precio debe ser una instancia de Precio")
         self.__precio = valor
 
     @property
@@ -403,6 +433,8 @@ class Libro:
 
     @stock.setter
     def stock(self, valor: Stock) -> None:
+        if not isinstance(valor, Stock):
+            raise ValueError("El stock debe ser una instancia de Stock")
         self.__stock = valor
 
     def __str__(self) -> str:

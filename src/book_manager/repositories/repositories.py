@@ -1,18 +1,32 @@
 """
 Repositorios responsables de la persistencia de las entidades del sistema.
 
-La persistencia se implementa sobre archivos CSV (carpeta migrations/csv),
-mediante una clase base genérica (RepositorioCSV) para las entidades con
-id numérico simple, y repositorios específicos para Libro, Stock y
-CotizacionDolar, cuyas claves de identidad no son un simple id entero.
+El módulo contiene dos familias de repositorios que implementan las mismas
+interfaces, de modo que los servicios no dependan del mecanismo de persistencia:
+
+- **Archivos CSV** (Sprint 1): `RepositorioCSV` como clase base genérica para
+  las entidades con id numérico simple, y repositorios específicos para Libro,
+  Stock y CotizacionDolar, cuyas claves de identidad no son un id entero.
+  Los CSV de `migrations/csv` se conservan como fuente de la migración.
+
+- **Base de datos relacional** (Sprint 2): `RepositorioSQLAlchemy` y sus
+  repositorios derivados, que persisten mediante los modelos ORM declarados en
+  `models/models.py`. La conversión entre modelos ORM y entidades de dominio se
+  realiza únicamente en este módulo: las entidades conservan su encapsulamiento
+  y no conocen la base de datos.
 """
 
 import abc
 import csv
 import datetime
 import os
-from typing import Dict, Generic, List, Optional, TypeVar
+from decimal import Decimal
+from typing import ClassVar, Dict, Generic, List, Optional, TypeVar
 
+from sqlalchemy import select
+from sqlalchemy.orm import Session, selectinload
+
+from book_manager.database.connection import ConexionDB
 from book_manager.entities.entities import (
     CotizacionDolar,
     EntidadBase,
@@ -23,6 +37,17 @@ from book_manager.entities.entities import (
     Precio,
     Stock,
     TipoCotizacion,
+)
+from book_manager.models.models import (
+    Base,
+    CotizacionDolarModel,
+    EditorialModel,
+    GeneroModel,
+    LibroModel,
+    MonedaModel,
+    PrecioModel,
+    StockModel,
+    TipoCotizacionModel,
 )
 
 T = TypeVar('T', bound=EntidadBase)
@@ -97,7 +122,19 @@ class IRepositorioLibro(abc.ABC):
 
 
 class IRepositorioStock(abc.ABC):
-    """Interfaz para el repositorio de Stock, asociado a un libro por ISBN."""
+    """Interfaz para el repositorio de Stock, asociado a un libro por ISBN.
+
+    Decisión de diseño: en este modelo el identificador del libro es el ISBN
+    (es la clave de la tabla `libros`, la clave de los CSV de origen y la del
+    repositorio de libros), por lo que el stock se busca y se elimina por ISBN
+    en lugar de por un id entero.
+
+    La interfaz provista por la cátedra en el TP1 declaraba
+    `leer_por_libro(libro_id: int)` y `eliminar(libro_id: int)`. La diferencia
+    entre ambas firmas quedó registrada como observación en la devolución de
+    ese trabajo y no fue resuelta oficialmente; se mantiene el ISBN para no
+    introducir un identificador nuevo en `Libro` ni migrar los datos del TP1.
+    """
 
     @abc.abstractmethod
     def crear(self, stock: Stock) -> Stock:
@@ -190,8 +227,11 @@ class _AlmacenCSV:
             self._escribir_filas([])
 
     def _leer_filas(self) -> List[Dict[str, str]]:
+        # `utf-8-sig` acepta archivos con y sin BOM, de modo que un CSV guardado
+        # desde otra herramienta no rompa el nombre de la primera columna. La
+        # escritura se mantiene en UTF-8 sin BOM.
         with open(self._ruta_csv, mode="r", newline="",
-                  encoding="utf-8") as archivo:
+                  encoding="utf-8-sig") as archivo:
             return list(csv.DictReader(archivo))
 
     def _escribir_filas(self, filas: List[Dict[str, str]]) -> None:
@@ -699,3 +739,608 @@ class RepositorioCotizacionDolar(_AlmacenCSV, IRepositorioCotizacionDolar):
             return False
         self._escribir_filas(restantes)
         return True
+
+
+# ===========================================================================
+# Sprint 2: repositorios sobre base de datos relacional (SQLAlchemy)
+# ===========================================================================
+#
+# Implementan las mismas interfaces que los repositorios CSV, por lo que los
+# servicios y la consola siguen funcionando sin modificaciones. Las lecturas
+# usan `ConexionDB.obtener_sesion()` y las escrituras `ConexionDB.transaccion()`,
+# de modo que cada operación de escritura se confirma o se revierte completa.
+
+
+# ---------------------------------------------------------------------------
+# Conversión de modelos ORM a entidades de dominio
+# ---------------------------------------------------------------------------
+
+def _genero_desde_modelo(modelo: GeneroModel) -> Genero:
+    """Convierte un modelo ORM de género en su entidad de dominio."""
+    return Genero(id_genero=modelo.id, nombre=modelo.nombre)
+
+
+def _editorial_desde_modelo(modelo: EditorialModel) -> Editorial:
+    """Convierte un modelo ORM de editorial en su entidad de dominio."""
+    return Editorial(
+        id_editorial=modelo.id, nombre=modelo.nombre, pais=modelo.pais
+    )
+
+
+def _moneda_desde_modelo(modelo: MonedaModel) -> Moneda:
+    """Convierte un modelo ORM de moneda en su entidad de dominio."""
+    return Moneda(
+        id_moneda=modelo.id,
+        codigo=modelo.codigo,
+        nombre=modelo.nombre,
+        simbolo=modelo.simbolo,
+    )
+
+
+def _tipo_cotizacion_desde_modelo(
+    modelo: TipoCotizacionModel,
+) -> TipoCotizacion:
+    """Convierte un modelo ORM de tipo de cotización en su entidad."""
+    return TipoCotizacion(id_tipo=modelo.id, nombre=modelo.nombre)
+
+
+def _precio_desde_modelo(modelo: PrecioModel) -> Precio:
+    """Convierte un modelo ORM de precio en su entidad de dominio.
+
+    La base de datos devuelve `Decimal` y la entidad de dominio espera `float`,
+    por lo que la conversión se hace de forma explícita.
+    """
+    return Precio(
+        id_precio=modelo.id,
+        valor=float(modelo.valor),
+        moneda=_moneda_desde_modelo(modelo.moneda),
+    )
+
+
+def _stock_desde_modelo(modelo: StockModel) -> Stock:
+    """Convierte un modelo ORM de stock en su entidad de dominio."""
+    return Stock(
+        id_stock=modelo.id_stock,
+        cantidad=modelo.cantidad,
+        cantidad_minima=modelo.cantidad_minima,
+        libro_isbn=modelo.libro_isbn,
+    )
+
+
+def _cotizacion_desde_modelo(
+    modelo: CotizacionDolarModel,
+) -> CotizacionDolar:
+    """Convierte un modelo ORM de cotización en su entidad de dominio."""
+    return CotizacionDolar(
+        id_cotizacion=modelo.id_cotizacion,
+        tipo=_tipo_cotizacion_desde_modelo(modelo.tipo),
+        valor_compra=float(modelo.valor_compra),
+        valor_venta=float(modelo.valor_venta),
+        fecha=modelo.fecha,
+    )
+
+
+def _libro_desde_modelo(modelo: LibroModel) -> Libro:
+    """Convierte un modelo ORM de libro en su entidad de dominio.
+
+    Si el libro todavía no tiene stock asociado se usa el mismo criterio que en
+    el repositorio CSV: un stock vacío en lugar de un error.
+    """
+    if modelo.stock is not None:
+        stock = _stock_desde_modelo(modelo.stock)
+    else:
+        stock = Stock(id_stock=0, cantidad=0, libro_isbn=modelo.isbn)
+
+    return Libro(
+        isbn=modelo.isbn,
+        titulo=modelo.titulo,
+        autor=modelo.autor,
+        editorial=_editorial_desde_modelo(modelo.editorial),
+        genero=_genero_desde_modelo(modelo.genero),
+        precio=_precio_desde_modelo(modelo.precio),
+        stock=stock,
+    )
+
+
+# ---------------------------------------------------------------------------
+# Repositorio genérico para entidades con id numérico simple
+# ---------------------------------------------------------------------------
+
+class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
+    """Repositorio base que persiste entidades de tipo T en una base de datos.
+
+    Attributes:
+        modelo (ClassVar[type[Base]]): Modelo ORM administrado por el
+            repositorio. Cada repositorio concreto debe declararlo.
+    """
+
+    modelo: ClassVar[type[Base]]
+
+    def __init__(self, conexion: ConexionDB) -> None:
+        self._conexion = conexion
+
+    @abc.abstractmethod
+    def _to_entidad(self, modelo: Base) -> T:
+        """Convierte un modelo ORM en su entidad de dominio."""
+
+    @abc.abstractmethod
+    def _to_modelo(self, entidad: T) -> Base:
+        """Convierte una entidad de dominio en un modelo ORM nuevo."""
+
+    @abc.abstractmethod
+    def _actualizar_modelo(self, modelo: Base, entidad: T) -> None:
+        """Copia sobre un modelo ORM existente los datos de la entidad."""
+
+    def _opciones_carga(self) -> tuple:
+        """Opciones de carga anticipada de relaciones, para evitar N+1."""
+        return ()
+
+    def _buscar(self, sesion: Session, id_entidad: int) -> Optional[Base]:
+        """Devuelve el modelo con la clave dada, o None si no existe."""
+        return sesion.get(self.modelo, id_entidad)
+
+    def crear(self, entidad: T) -> T:
+        with self._conexion.transaccion() as sesion:
+            if self._buscar(sesion, entidad.id) is not None:
+                raise ValueError(f"Ya existe una entidad con id {entidad.id}")
+            modelo = self._to_modelo(entidad)
+            sesion.add(modelo)
+            sesion.flush()
+            return self._to_entidad(modelo)
+
+    def leer_por_id(self, id: int) -> Optional[T]:
+        with self._conexion.obtener_sesion() as sesion:
+            modelo = self._buscar(sesion, id)
+            if modelo is None:
+                return None
+            return self._to_entidad(modelo)
+
+    def leer_todos(self) -> List[T]:
+        with self._conexion.obtener_sesion() as sesion:
+            columna_pk = self.modelo.__mapper__.primary_key[0]
+            sentencia = (
+                select(self.modelo)
+                .options(*self._opciones_carga())
+                .order_by(columna_pk)
+            )
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [self._to_entidad(modelo) for modelo in modelos]
+
+    def actualizar(self, entidad: T) -> T:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, entidad.id)
+            if modelo is None:
+                raise ValueError(
+                    f"No se encontró la entidad con id {entidad.id} "
+                    f"para actualizar"
+                )
+            self._actualizar_modelo(modelo, entidad)
+            sesion.flush()
+            # Se refresca el modelo para que la entidad devuelta refleje el
+            # estado persistido, incluidas las relaciones recargadas.
+            sesion.expire(modelo)
+            return self._to_entidad(modelo)
+
+    def eliminar(self, id: int) -> bool:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, id)
+            if modelo is None:
+                return False
+            sesion.delete(modelo)
+            return True
+
+
+# ---------------------------------------------------------------------------
+# Repositorios concretos para entidades simples
+# ---------------------------------------------------------------------------
+
+class RepositorioGeneroSQLAlchemy(RepositorioSQLAlchemy[Genero]):
+    """Repositorio CRUD de Genero sobre la tabla `generos`."""
+
+    modelo = GeneroModel
+
+    def _to_entidad(self, modelo: GeneroModel) -> Genero:
+        return _genero_desde_modelo(modelo)
+
+    def _to_modelo(self, entidad: Genero) -> GeneroModel:
+        return GeneroModel(id=entidad.id_genero, nombre=entidad.nombre)
+
+    def _actualizar_modelo(self, modelo: GeneroModel,
+                           entidad: Genero) -> None:
+        modelo.nombre = entidad.nombre
+
+
+class RepositorioEditorialSQLAlchemy(RepositorioSQLAlchemy[Editorial]):
+    """Repositorio CRUD de Editorial sobre la tabla `editoriales`."""
+
+    modelo = EditorialModel
+
+    def _to_entidad(self, modelo: EditorialModel) -> Editorial:
+        return _editorial_desde_modelo(modelo)
+
+    def _to_modelo(self, entidad: Editorial) -> EditorialModel:
+        return EditorialModel(
+            id=entidad.id_editorial,
+            nombre=entidad.nombre,
+            pais=entidad.pais,
+        )
+
+    def _actualizar_modelo(self, modelo: EditorialModel,
+                           entidad: Editorial) -> None:
+        modelo.nombre = entidad.nombre
+        modelo.pais = entidad.pais
+
+
+class RepositorioMonedaSQLAlchemy(RepositorioSQLAlchemy[Moneda]):
+    """Repositorio CRUD de Moneda sobre la tabla `monedas`."""
+
+    modelo = MonedaModel
+
+    def _to_entidad(self, modelo: MonedaModel) -> Moneda:
+        return _moneda_desde_modelo(modelo)
+
+    def _to_modelo(self, entidad: Moneda) -> MonedaModel:
+        return MonedaModel(
+            id=entidad.id_moneda,
+            codigo=entidad.codigo,
+            nombre=entidad.nombre,
+            simbolo=entidad.simbolo,
+        )
+
+    def _actualizar_modelo(self, modelo: MonedaModel,
+                           entidad: Moneda) -> None:
+        modelo.codigo = entidad.codigo
+        modelo.nombre = entidad.nombre
+        modelo.simbolo = entidad.simbolo
+
+
+class RepositorioTipoCotizacionSQLAlchemy(
+    RepositorioSQLAlchemy[TipoCotizacion]
+):
+    """Repositorio CRUD de TipoCotizacion sobre la tabla `tipos_cotizacion`."""
+
+    modelo = TipoCotizacionModel
+
+    def _to_entidad(self, modelo: TipoCotizacionModel) -> TipoCotizacion:
+        return _tipo_cotizacion_desde_modelo(modelo)
+
+    def _to_modelo(self, entidad: TipoCotizacion) -> TipoCotizacionModel:
+        return TipoCotizacionModel(id=entidad.id_tipo, nombre=entidad.nombre)
+
+    def _actualizar_modelo(self, modelo: TipoCotizacionModel,
+                           entidad: TipoCotizacion) -> None:
+        modelo.nombre = entidad.nombre
+
+
+class RepositorioPrecioSQLAlchemy(RepositorioSQLAlchemy[Precio]):
+    """Repositorio CRUD de Precio sobre la tabla `precios`.
+
+    La conversión a `Decimal` se hace a partir de la representación textual del
+    valor para evitar los errores de redondeo del punto flotante binario.
+    """
+
+    modelo = PrecioModel
+
+    def _opciones_carga(self) -> tuple:
+        return (selectinload(PrecioModel.moneda),)
+
+    def _to_entidad(self, modelo: PrecioModel) -> Precio:
+        return _precio_desde_modelo(modelo)
+
+    def _to_modelo(self, entidad: Precio) -> PrecioModel:
+        return PrecioModel(
+            id=entidad.id_precio,
+            valor=Decimal(str(entidad.valor)),
+            moneda_id=entidad.moneda.id_moneda,
+        )
+
+    def _actualizar_modelo(self, modelo: PrecioModel,
+                           entidad: Precio) -> None:
+        modelo.valor = Decimal(str(entidad.valor))
+        modelo.moneda_id = entidad.moneda.id_moneda
+
+    def eliminar(self, id: int) -> bool:
+        """Elimina un precio, siempre que ningún libro dependa de él.
+
+        Un precio referenciado por un libro no puede borrarse de forma
+        independiente: la clave foránea `libros.precio_id` no admite nulos. Se
+        informa con un error claro en lugar de dejar que la base falle, y el
+        precio se elimina junto con su libro desde `ServicioLibro.eliminar`.
+
+        Raises:
+            ValueError: Si el precio está asociado a un libro.
+        """
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, id)
+            if modelo is None:
+                return False
+
+            libro = sesion.execute(
+                select(LibroModel).where(LibroModel.precio_id == id)
+            ).scalars().first()
+            if libro is not None:
+                raise ValueError(
+                    f"El precio {id} está asociado al libro {libro.isbn} "
+                    f"y no puede eliminarse por separado"
+                )
+
+            sesion.delete(modelo)
+            return True
+
+
+# ---------------------------------------------------------------------------
+# Repositorio de Libro (clave: ISBN)
+# ---------------------------------------------------------------------------
+
+class RepositorioLibroSQLAlchemy(IRepositorioLibro):
+    """Repositorio CRUD de Libro sobre la tabla `libros`."""
+
+    # Carga anticipada de las relaciones necesarias para reconstruir el libro
+    # completo sin una consulta por cada registro del listado.
+    _OPCIONES_CARGA = (
+        selectinload(LibroModel.genero),
+        selectinload(LibroModel.editorial),
+        selectinload(LibroModel.precio).selectinload(PrecioModel.moneda),
+        selectinload(LibroModel.stock),
+    )
+
+    def __init__(self, conexion: ConexionDB) -> None:
+        self._conexion = conexion
+
+    def _buscar(self, sesion: Session, isbn: str) -> Optional[LibroModel]:
+        sentencia = (
+            select(LibroModel)
+            .options(*self._OPCIONES_CARGA)
+            .where(LibroModel.isbn == isbn)
+        )
+        return sesion.execute(sentencia).scalars().first()
+
+    def _to_modelo(self, libro: Libro) -> LibroModel:
+        return LibroModel(
+            isbn=libro.isbn,
+            titulo=libro.titulo,
+            autor=libro.autor,
+            editorial_id=libro.editorial.id_editorial,
+            genero_id=libro.genero.id_genero,
+            precio_id=libro.precio.id_precio,
+        )
+
+    def crear(self, libro: Libro) -> Libro:
+        with self._conexion.transaccion() as sesion:
+            if self._buscar(sesion, libro.isbn) is not None:
+                raise ValueError(f"Ya existe un libro con ISBN {libro.isbn}")
+            sesion.add(self._to_modelo(libro))
+            sesion.flush()
+            return _libro_desde_modelo(self._buscar(sesion, libro.isbn))
+
+    def leer_por_isbn(self, isbn: str) -> Optional[Libro]:
+        with self._conexion.obtener_sesion() as sesion:
+            modelo = self._buscar(sesion, isbn)
+            if modelo is None:
+                return None
+            return _libro_desde_modelo(modelo)
+
+    def leer_todos(self) -> List[Libro]:
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = (
+                select(LibroModel)
+                .options(*self._OPCIONES_CARGA)
+                .order_by(LibroModel.isbn)
+            )
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [_libro_desde_modelo(modelo) for modelo in modelos]
+
+    def actualizar(self, libro: Libro) -> Libro:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, libro.isbn)
+            if modelo is None:
+                raise ValueError(
+                    f"No se encontró el libro con ISBN {libro.isbn} "
+                    f"para actualizar"
+                )
+            modelo.titulo = libro.titulo
+            modelo.autor = libro.autor
+            modelo.editorial_id = libro.editorial.id_editorial
+            modelo.genero_id = libro.genero.id_genero
+            modelo.precio_id = libro.precio.id_precio
+            sesion.flush()
+            sesion.expire(modelo)
+            return _libro_desde_modelo(self._buscar(sesion, libro.isbn))
+
+    def eliminar(self, isbn: str) -> bool:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, isbn)
+            if modelo is None:
+                return False
+            sesion.delete(modelo)
+            return True
+
+
+# ---------------------------------------------------------------------------
+# Repositorio de Stock (clave: ISBN del libro asociado)
+# ---------------------------------------------------------------------------
+
+class RepositorioStockSQLAlchemy(IRepositorioStock):
+    """Repositorio CRUD de Stock sobre la tabla `stock`."""
+
+    def __init__(self, conexion: ConexionDB) -> None:
+        self._conexion = conexion
+
+    def _buscar(self, sesion: Session, libro_isbn: str) -> Optional[StockModel]:
+        sentencia = select(StockModel).where(
+            StockModel.libro_isbn == libro_isbn
+        )
+        return sesion.execute(sentencia).scalars().first()
+
+    def _validar_libro(self, stock: Stock) -> str:
+        if not stock.libro_isbn:
+            raise ValueError(
+                "El stock debe tener asignado el ISBN del libro asociado"
+            )
+        return stock.libro_isbn
+
+    def crear(self, stock: Stock) -> Stock:
+        libro_isbn = self._validar_libro(stock)
+        with self._conexion.transaccion() as sesion:
+            if self._buscar(sesion, libro_isbn) is not None:
+                raise ValueError(
+                    f"Ya existe stock para el libro {libro_isbn}"
+                )
+            sesion.add(
+                StockModel(
+                    id_stock=stock.id_stock,
+                    libro_isbn=libro_isbn,
+                    cantidad=stock.cantidad,
+                    cantidad_minima=stock.cantidad_minima,
+                )
+            )
+            sesion.flush()
+            return _stock_desde_modelo(self._buscar(sesion, libro_isbn))
+
+    def leer_por_libro(self, libro_isbn: str) -> Optional[Stock]:
+        with self._conexion.obtener_sesion() as sesion:
+            modelo = self._buscar(sesion, libro_isbn)
+            if modelo is None:
+                return None
+            return _stock_desde_modelo(modelo)
+
+    def leer_todos(self) -> List[Stock]:
+        """Devuelve todos los registros de stock."""
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = select(StockModel).order_by(StockModel.id_stock)
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [_stock_desde_modelo(modelo) for modelo in modelos]
+
+    def actualizar(self, stock: Stock) -> Stock:
+        libro_isbn = self._validar_libro(stock)
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, libro_isbn)
+            if modelo is None:
+                raise ValueError(
+                    f"No se encontró stock para el libro {libro_isbn}"
+                )
+            modelo.cantidad = stock.cantidad
+            modelo.cantidad_minima = stock.cantidad_minima
+            sesion.flush()
+            sesion.expire(modelo)
+            return _stock_desde_modelo(self._buscar(sesion, libro_isbn))
+
+    def eliminar(self, libro_isbn: str) -> bool:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, libro_isbn)
+            if modelo is None:
+                return False
+            sesion.delete(modelo)
+            return True
+
+
+# ---------------------------------------------------------------------------
+# Repositorio de CotizacionDolar (clave compuesta: tipo + fecha)
+# ---------------------------------------------------------------------------
+
+class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
+    """Repositorio CRUD de CotizacionDolar sobre la tabla `cotizaciones`."""
+
+    _OPCIONES_CARGA = (selectinload(CotizacionDolarModel.tipo),)
+
+    def __init__(self, conexion: ConexionDB) -> None:
+        self._conexion = conexion
+
+    def _buscar(
+        self, sesion: Session, tipo_id: int, fecha: datetime.date
+    ) -> Optional[CotizacionDolarModel]:
+        sentencia = (
+            select(CotizacionDolarModel)
+            .options(*self._OPCIONES_CARGA)
+            .where(
+                CotizacionDolarModel.tipo_id == tipo_id,
+                CotizacionDolarModel.fecha == fecha,
+            )
+        )
+        return sesion.execute(sentencia).scalars().first()
+
+    def _buscar_por_id(
+        self, sesion: Session, id_cotizacion: int
+    ) -> Optional[CotizacionDolarModel]:
+        sentencia = (
+            select(CotizacionDolarModel)
+            .options(*self._OPCIONES_CARGA)
+            .where(CotizacionDolarModel.id_cotizacion == id_cotizacion)
+        )
+        return sesion.execute(sentencia).scalars().first()
+
+    def crear(self, cotizacion: CotizacionDolar) -> CotizacionDolar:
+        tipo_id = cotizacion.tipo.id_tipo
+        with self._conexion.transaccion() as sesion:
+            if self._buscar(sesion, tipo_id, cotizacion.fecha) is not None:
+                raise ValueError(
+                    f"Ya existe una cotización de tipo {tipo_id} "
+                    f"para la fecha {cotizacion.fecha}"
+                )
+            sesion.add(
+                CotizacionDolarModel(
+                    id_cotizacion=cotizacion.id_cotizacion,
+                    tipo_id=tipo_id,
+                    valor_compra=Decimal(str(cotizacion.valor_compra)),
+                    valor_venta=Decimal(str(cotizacion.valor_venta)),
+                    fecha=cotizacion.fecha,
+                )
+            )
+            sesion.flush()
+            modelo = self._buscar_por_id(sesion, cotizacion.id_cotizacion)
+            return _cotizacion_desde_modelo(modelo)
+
+    def leer_por_tipo_y_fecha(
+        self, tipo_id: int, fecha: datetime.date
+    ) -> Optional[CotizacionDolar]:
+        with self._conexion.obtener_sesion() as sesion:
+            modelo = self._buscar(sesion, tipo_id, fecha)
+            if modelo is None:
+                return None
+            return _cotizacion_desde_modelo(modelo)
+
+    def leer_historico_por_tipo(
+        self, tipo_id: int
+    ) -> List[CotizacionDolar]:
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = (
+                select(CotizacionDolarModel)
+                .options(*self._OPCIONES_CARGA)
+                .where(CotizacionDolarModel.tipo_id == tipo_id)
+                .order_by(CotizacionDolarModel.fecha)
+            )
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [_cotizacion_desde_modelo(modelo) for modelo in modelos]
+
+    def leer_todos(self) -> List[CotizacionDolar]:
+        """Devuelve todas las cotizaciones registradas."""
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = (
+                select(CotizacionDolarModel)
+                .options(*self._OPCIONES_CARGA)
+                .order_by(CotizacionDolarModel.id_cotizacion)
+            )
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [_cotizacion_desde_modelo(modelo) for modelo in modelos]
+
+    def actualizar(self, cotizacion: CotizacionDolar) -> CotizacionDolar:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar_por_id(sesion, cotizacion.id_cotizacion)
+            if modelo is None:
+                raise ValueError("No se encontró la cotización a actualizar")
+            modelo.tipo_id = cotizacion.tipo.id_tipo
+            modelo.valor_compra = Decimal(str(cotizacion.valor_compra))
+            modelo.valor_venta = Decimal(str(cotizacion.valor_venta))
+            modelo.fecha = cotizacion.fecha
+            sesion.flush()
+            sesion.expire(modelo)
+            modelo = self._buscar_por_id(sesion, cotizacion.id_cotizacion)
+            return _cotizacion_desde_modelo(modelo)
+
+    def eliminar(self, tipo_id: int, fecha: datetime.date) -> bool:
+        with self._conexion.transaccion() as sesion:
+            modelo = self._buscar(sesion, tipo_id, fecha)
+            if modelo is None:
+                return False
+            sesion.delete(modelo)
+            return True
