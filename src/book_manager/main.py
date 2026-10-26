@@ -6,9 +6,12 @@ los repositorios, los servicios y lanza la interfaz de consola.
 
 from book_manager.database.connection import ConexionDB
 from book_manager.migrations.migrations import (
+    CARPETA_CSV_POR_DEFECTO,
+    CARPETA_SQL_POR_DEFECTO,
     crear_tablas,
-    migrar_base_de_datos,
+    migrar_datos,
 )
+from book_manager.preload_data.preload_data import cargar_datos_iniciales
 from book_manager.repositories.repositories import (
     RepositorioCotizacionDolar,
     RepositorioEditorial,
@@ -36,11 +39,11 @@ def main(import_default_data: bool = True) -> None:
     """Ensambla el sistema y ejecuta la consola.
 
     Args:
-        import_default_data (bool): Si es True, asegura el esquema y ejecuta la
-            migración de los datos del Sprint 1 (archivos CSV) a la base de
-            datos. Si es False, no se importa ningún registro: únicamente se
-            asegura de que las tablas existan, para que el sistema opere sobre
-            los datos ya cargados en la base.
+        import_default_data (bool): Si es True, asegura el esquema, genera
+            los scripts SQL desde los CSV y los carga en la base de datos. Si
+            es False, no se importa ningún registro: únicamente se asegura de
+            que las tablas existan, para que el sistema opere sobre los datos
+            ya cargados en la base.
     """
     conexion = ConexionDB()
 
@@ -57,16 +60,16 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
 
     Args:
         conexion (ConexionDB): Conexión a la base de datos, ya creada.
-        import_default_data (bool): Si es True, ejecuta la migración de datos.
+        import_default_data (bool): Si es True, carga los datos iniciales.
     """
 
     # ------------------------------------------------------------------
     # 1. Esquema y datos iniciales
     # ------------------------------------------------------------------
+    crear_tablas(conexion)
     if import_default_data:
-        migrar_base_de_datos(conexion)
-    else:
-        crear_tablas(conexion)
+        migrar_datos(CARPETA_CSV_POR_DEFECTO, CARPETA_SQL_POR_DEFECTO)
+        cargar_datos_iniciales(conexion, CARPETA_SQL_POR_DEFECTO)
 
     # ------------------------------------------------------------------
     # 2. Repositorios

@@ -1,5 +1,13 @@
 # Sprint 3
 
+[Ejercicio 02]
+- Reescritura de `preload_data/preload_data.py`: ya no usa repositorios CSV, ahora carga los datos desde archivos `.sql`.
+- Nueva función `cargar_datos_desde_sql(conexion, ruta_sql)`: ejecuta las sentencias de un script en una transacción, separándolas por `;` fuera de comillas e ignorando comentarios; rechaza las sentencias de estructura (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`).
+- Nueva función `cargar_datos_iniciales(conexion, carpeta_sqls)`: recorre los `.sql` en orden alfabético y los carga.
+- `aplicar_migracion()` pasa a delegar en `cargar_datos_iniciales()` para no duplicar lógica.
+- `main(import_default_data)`: con `True` crea las tablas, genera los scripts desde los CSV y los carga; con `False` solo crea las tablas.
+- Se versionan los scripts `.sql` regenerados en `migrations/sql/` con el nuevo esquema.
+
 [Ejercicio 01]
 - Creación de la rama `Sprint_3` a partir de `Sprint_2`.
 - Actualización de `README.md` con el objetivo, la introducción y el contexto del Sprint 3, la estructura, las variables de entorno y el historial de sprints.

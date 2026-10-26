@@ -7,6 +7,7 @@ Este módulo lee los archivos CSV de migrations/csv, genera scripts SQL
 con sentencias INSERT y los ejecuta en la base de datos.
 
 Los scripts SQL generados se guardan en migrations/sql/ y se versionan.
+Para ejecutarlos se usa `preload_data.cargar_datos_iniciales()`.
 
 Las sentencias de inserción son idempotentes: utilizan ON CONFLICT DO NOTHING
 para evitar duplicar registros cuando se repite la migración.
@@ -18,18 +19,15 @@ para conservar correctamente los acentos y la ñ.
 """
 
 import csv
-import glob
 import os
-import re
 from dataclasses import dataclass
 from datetime import date
 from decimal import Decimal
 from typing import Dict, List, Tuple
 
-from sqlalchemy import text
-
 from book_manager.database.connection import ConexionDB
 from book_manager.models.models import Base
+from book_manager.preload_data.preload_data import cargar_datos_iniciales
 
 
 # Raíz del proyecto: migrations/ -> book_manager/ -> src/ -> raíz.
@@ -47,14 +45,6 @@ CARPETA_SQL_POR_DEFECTO = os.path.join(
     _RAIZ_PROYECTO, "src", "book_manager", "migrations", "sql"
 )
 
-
-# Sentencias de estructura que no deben ejecutarse durante la migración
-# de datos. La creación de tablas corresponde a SQLAlchemy.
-_PATRON_ESTRUCTURA = re.compile(
-    r"\b(CREATE|ALTER|DROP|TRUNCATE)\s+"
-    r"(TABLE|INDEX|SCHEMA|VIEW|SEQUENCE)",
-    re.IGNORECASE,
-)
 
 # Tipos de datos admitidos en las columnas de origen.
 TEXTO = "texto"
@@ -282,20 +272,6 @@ def migrar_datos(
     return rutas_generadas
 
 
-def _leer_sentencia(ruta_sql: str) -> str | None:
-    """Lee un script SQL y elimina las líneas de comentarios."""
-
-    with open(ruta_sql, mode="r", encoding="utf-8") as archivo:
-        lineas = [
-            linea
-            for linea in archivo.read().splitlines()
-            if not linea.strip().startswith("--")
-        ]
-
-    sentencia = "\n".join(lineas).strip()
-    return sentencia or None
-
-
 def crear_tablas(conexion: ConexionDB) -> None:
     """Crea las tablas que todavía no existan.
 
@@ -325,53 +301,29 @@ def recrear_tablas(conexion: ConexionDB) -> None:
 def aplicar_migracion(
     conexion: ConexionDB,
     carpeta_sqls: str,
-) -> Dict[str, int]:
+) -> List[str]:
     """
-    Ejecuta los scripts SQL dentro de una única transacción.
+    Ejecuta los scripts SQL de datos de una carpeta.
 
-    Si un script falla, la transacción completa se revierte.
+    Delega en `cargar_datos_iniciales`, que ejecuta cada script en su propia
+    transacción y rechaza las sentencias de estructura.
+
+    Args:
+        conexion: Conexión a la base de datos.
+        carpeta_sqls: Carpeta con los scripts `.sql`.
+
+    Returns:
+        Rutas de los scripts ejecutados, en orden de ejecución.
     """
 
-    rutas = sorted(
-        glob.glob(os.path.join(carpeta_sqls, "*.sql"))
-    )
-
-    if not rutas:
-        raise FileNotFoundError(
-            f"No se encontraron scripts .sql en {carpeta_sqls}. "
-            "Ejecutá migrar_datos() para generarlos."
-        )
-
-    resultado: Dict[str, int] = {}
-
-    with conexion.transaccion() as sesion:
-        for ruta in rutas:
-            sentencia = _leer_sentencia(ruta)
-
-            if sentencia is None:
-                resultado[os.path.basename(ruta)] = 0
-                continue
-
-            if _PATRON_ESTRUCTURA.search(sentencia):
-                raise ValueError(
-                    f"El script {os.path.basename(ruta)} contiene "
-                    "sentencias de estructura (CREATE/ALTER/DROP/TRUNCATE). "
-                    "La migración de datos solo acepta inserciones. "
-                    "La estructura se crea mediante crear_tablas()."
-                )
-
-            resultado[os.path.basename(ruta)] = sesion.execute(
-                text(sentencia)
-            ).rowcount
-
-    return resultado
+    return cargar_datos_iniciales(conexion, carpeta_sqls)
 
 
 def migrar_base_de_datos(
     conexion: ConexionDB,
     carpeta_csvs: str = CARPETA_CSV_POR_DEFECTO,
     carpeta_sqls: str = CARPETA_SQL_POR_DEFECTO,
-) -> Dict[str, int]:
+) -> List[str]:
     """
     Crea las tablas, genera los scripts SQL y migra los datos.
 
@@ -381,7 +333,7 @@ def migrar_base_de_datos(
         carpeta_sqls: Carpeta para generar y ejecutar los scripts SQL.
 
     Returns:
-        Cantidad de filas insertadas por cada script aplicado.
+        Rutas de los scripts ejecutados, en orden de ejecución.
     """
 
     crear_tablas(conexion)
