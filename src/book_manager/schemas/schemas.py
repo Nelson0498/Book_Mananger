@@ -1,5 +1,4 @@
-"""
-Esquemas Pydantic para validación y estructuración de datos de entrada.
+"""Esquemas Pydantic para validación y estructuración de datos de entrada.
 
 Estos modelos NO reemplazan las entidades POO del dominio.  Su función
 es validar los datos que ingresan desde la consola (u otra fuente
@@ -14,7 +13,7 @@ estructura, tipos y restricciones simples de los datos de entrada.
 """
 
 from datetime import date
-from typing import Optional
+from typing import List, Optional
 
 from pydantic import BaseModel, Field, field_validator
 
@@ -111,10 +110,12 @@ class TipoCotizacionUpdateInput(BaseModel):
 # ---------------------------------------------------------------------------
 
 class PrecioInput(BaseModel):
-    """Datos de entrada para crear un precio."""
-    id_precio: int = Field(gt=0, description="ID del precio")
+    """Datos de entrada para agregar un precio a un libro."""
+    libro_id: int = Field(gt=0, description="ID del libro")
+    codigo_moneda: str = Field(
+        min_length=1, description="Código de la moneda (ej: USD)"
+    )
     valor: float = Field(ge=0, description="Valor del precio")
-    moneda_id: int = Field(gt=0, description="ID de la moneda asociada")
 
 
 class PrecioUpdateInput(BaseModel):
@@ -130,18 +131,14 @@ class PrecioUpdateInput(BaseModel):
 class StockInput(BaseModel):
     """Datos de entrada para crear un stock."""
     id_stock: int = Field(gt=0, description="ID del stock")
-    libro_isbn: str = Field(
-        min_length=1, description="ISBN del libro asociado"
-    )
+    libro_id: int = Field(gt=0, description="ID del libro asociado")
     cantidad: int = Field(ge=0, description="Cantidad inicial")
     cantidad_minima: int = Field(ge=0, description="Cantidad mínima")
 
 
 class StockMovimientoInput(BaseModel):
     """Datos de entrada para registrar un ingreso o egreso de stock."""
-    libro_isbn: str = Field(
-        min_length=1, description="ISBN del libro"
-    )
+    libro_id: int = Field(gt=0, description="ID del libro")
     cantidad: int = Field(gt=0, description="Cantidad a mover")
 
 
@@ -149,24 +146,35 @@ class StockMovimientoInput(BaseModel):
 # Libro
 # ---------------------------------------------------------------------------
 
+class PrecioLibroInput(BaseModel):
+    """Precio de un libro en una moneda, dentro del alta de un libro."""
+    codigo_moneda: str = Field(
+        min_length=1, description="Código de la moneda (ej: ARS)"
+    )
+    valor: float = Field(ge=0, description="Valor del precio")
+
+
 class LibroInput(BaseModel):
-    """Datos de entrada para crear un libro con su precio y stock."""
+    """Datos de entrada para crear un libro con sus precios y stock."""
+    id_libro: int = Field(gt=0, description="ID del libro")
     isbn: str = Field(min_length=1, description="ISBN del libro")
     titulo: str = Field(min_length=1, description="Título del libro")
     autor: str = Field(min_length=1, description="Autor del libro")
     editorial_id: int = Field(gt=0, description="ID de la editorial")
     genero_id: int = Field(gt=0, description="ID del género")
-    precio_id: int = Field(gt=0, description="ID para el nuevo precio")
-    precio_valor: float = Field(ge=0, description="Valor del precio")
-    moneda_id: int = Field(gt=0, description="ID de la moneda")
-    stock_id: int = Field(gt=0, description="ID para el stock")
+    precios: List[PrecioLibroInput] = Field(
+        min_length=1, description="Precios del libro, uno por moneda"
+    )
     cantidad_inicial: int = Field(ge=0, description="Cantidad inicial")
     cantidad_minima: int = Field(ge=0, description="Cantidad mínima")
 
 
 class LibroUpdateInput(BaseModel):
     """Datos de entrada para actualizar datos de un libro."""
-    isbn: str = Field(min_length=1, description="ISBN del libro a modificar")
+    id_libro: int = Field(gt=0, description="ID del libro a modificar")
+    isbn: Optional[str] = Field(
+        default=None, min_length=1, description="Nuevo ISBN"
+    )
     titulo: Optional[str] = Field(
         default=None, min_length=1, description="Nuevo título"
     )
@@ -177,7 +185,10 @@ class LibroUpdateInput(BaseModel):
 
 class LibroPrecioUpdateInput(BaseModel):
     """Datos de entrada para actualizar el precio de un libro."""
-    isbn: str = Field(min_length=1, description="ISBN del libro")
+    id_libro: int = Field(gt=0, description="ID del libro")
+    codigo_moneda: str = Field(
+        min_length=1, description="Moneda del precio a modificar"
+    )
     nuevo_valor: float = Field(
         ge=0, description="Nuevo valor del precio"
     )

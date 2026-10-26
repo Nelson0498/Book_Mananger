@@ -1,8 +1,7 @@
-"""
-Punto de entrada del sistema Book Manager – Sprint 2.
+"""Punto de entrada del sistema Book Manager – Sprint 3.
 
 Ensambla la conexión a la base de datos, la migración de los datos iniciales,
-los repositorios SQLAlchemy, los servicios y lanza la interfaz de consola.
+los repositorios, los servicios y lanza la interfaz de consola.
 """
 
 from book_manager.database.connection import ConexionDB
@@ -11,14 +10,14 @@ from book_manager.migrations.migrations import (
     migrar_base_de_datos,
 )
 from book_manager.repositories.repositories import (
-    RepositorioCotizacionDolarSQLAlchemy,
-    RepositorioEditorialSQLAlchemy,
-    RepositorioGeneroSQLAlchemy,
-    RepositorioLibroSQLAlchemy,
-    RepositorioMonedaSQLAlchemy,
-    RepositorioPrecioSQLAlchemy,
-    RepositorioStockSQLAlchemy,
-    RepositorioTipoCotizacionSQLAlchemy,
+    RepositorioCotizacionDolar,
+    RepositorioEditorial,
+    RepositorioGenero,
+    RepositorioLibro,
+    RepositorioMoneda,
+    RepositorioPrecio,
+    RepositorioStock,
+    RepositorioTipoCotizacion,
 )
 from book_manager.services.services import (
     ServicioCotizacionDolar,
@@ -72,14 +71,14 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
     # ------------------------------------------------------------------
     # 2. Repositorios
     # ------------------------------------------------------------------
-    repo_genero = RepositorioGeneroSQLAlchemy(conexion)
-    repo_editorial = RepositorioEditorialSQLAlchemy(conexion)
-    repo_moneda = RepositorioMonedaSQLAlchemy(conexion)
-    repo_tipo_cotizacion = RepositorioTipoCotizacionSQLAlchemy(conexion)
-    repo_precio = RepositorioPrecioSQLAlchemy(conexion)
-    repo_stock = RepositorioStockSQLAlchemy(conexion)
-    repo_libro = RepositorioLibroSQLAlchemy(conexion)
-    repo_cotizacion = RepositorioCotizacionDolarSQLAlchemy(conexion)
+    repo_genero = RepositorioGenero(conexion)
+    repo_editorial = RepositorioEditorial(conexion)
+    repo_moneda = RepositorioMoneda(conexion)
+    repo_tipo_cotizacion = RepositorioTipoCotizacion(conexion)
+    repo_precio = RepositorioPrecio(conexion)
+    repo_stock = RepositorioStock(conexion)
+    repo_libro = RepositorioLibro(conexion)
+    repo_cotizacion = RepositorioCotizacionDolar(conexion)
 
     # ------------------------------------------------------------------
     # 3. Servicios
@@ -90,8 +89,8 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
     svc_tipo_cotizacion = ServicioTipoCotizacion(
         repo_tipo_cotizacion, repo_cotizacion,
     )
-    svc_precio = ServicioPrecio(repo_precio, repo_moneda)
-    svc_stock = ServicioStock(repo_stock)
+    svc_precio = ServicioPrecio(repo_precio, repo_moneda, repo_libro)
+    svc_stock = ServicioStock(repo_stock, repo_libro)
     svc_libro = ServicioLibro(
         repo_libro, repo_genero, repo_editorial,
         repo_moneda, repo_precio, repo_stock,

@@ -6,9 +6,10 @@ datos, restricciones y relaciones. Los nombres de las tablas y de las columnas
 coinciden con los encabezados de los archivos CSV del Sprint 1, de modo que la
 migración de datos sea una correspondencia directa y verificable.
 
-Los identificadores son suministrados por la aplicación, igual que en el
-Sprint 1, por lo que las claves primarias no dependen de secuencias
-autogeneradas: la migración puede re-ejecutarse sin colisiones de secuencia.
+Los identificadores de las tablas de negocio son suministrados por la
+aplicación, igual que en el Sprint 1, por lo que sus claves primarias no
+dependen de secuencias autogeneradas: la migración puede re-ejecutarse sin
+colisiones de secuencia.
 
 Estas clases son el modelo de persistencia y no reemplazan a las entidades de
 dominio de `entities/entities.py`, que conservan su encapsulamiento. La
@@ -46,7 +47,9 @@ class GeneroModel(Base):
 
     __tablename__ = "generos"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
     nombre: Mapped[str] = mapped_column(
         String(100), nullable=False, unique=True
     )
@@ -54,6 +57,7 @@ class GeneroModel(Base):
     libros: Mapped[List["LibroModel"]] = relationship(back_populates="genero")
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return f"GeneroModel(id={self.id}, nombre='{self.nombre}')"
 
 
@@ -62,7 +66,9 @@ class EditorialModel(Base):
 
     __tablename__ = "editoriales"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
     nombre: Mapped[str] = mapped_column(String(100), nullable=False)
     pais: Mapped[Optional[str]] = mapped_column(String(100), nullable=True)
 
@@ -71,6 +77,7 @@ class EditorialModel(Base):
     )
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return f"EditorialModel(id={self.id}, nombre='{self.nombre}')"
 
 
@@ -79,7 +86,9 @@ class MonedaModel(Base):
 
     __tablename__ = "monedas"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
     codigo: Mapped[str] = mapped_column(
         String(10), nullable=False, unique=True
     )
@@ -91,6 +100,7 @@ class MonedaModel(Base):
     )
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return f"MonedaModel(id={self.id}, codigo='{self.codigo}')"
 
 
@@ -99,7 +109,9 @@ class TipoCotizacionModel(Base):
 
     __tablename__ = "tipos_cotizacion"
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
     nombre: Mapped[str] = mapped_column(
         String(100), nullable=False, unique=True
     )
@@ -109,49 +121,59 @@ class TipoCotizacionModel(Base):
     )
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return f"TipoCotizacionModel(id={self.id}, nombre='{self.nombre}')"
 
 
 class PrecioModel(Base):
-    """Tabla `precios`: valor de un libro en una moneda determinada."""
+    """Tabla `precios`: valor de un libro en una moneda determinada.
+
+    Un libro puede tener varios precios (relación 1 a N), uno por moneda: la
+    restricción `(libro_id, moneda_id)` impide repetir la moneda.
+    """
 
     __tablename__ = "precios"
     __table_args__ = (
+        UniqueConstraint(
+            "libro_id", "moneda_id", name="uq_precios_libro_moneda"
+        ),
         CheckConstraint(
             "valor >= 0", name="ck_precios_valor_no_negativo"
         ),
     )
 
-    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    valor: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
+    libro_id: Mapped[int] = mapped_column(
+        ForeignKey("libros.id"), nullable=False, index=True
+    )
     moneda_id: Mapped[int] = mapped_column(
         ForeignKey("monedas.id"), nullable=False, index=True
     )
+    valor: Mapped[Decimal] = mapped_column(Numeric(12, 2), nullable=False)
 
     moneda: Mapped["MonedaModel"] = relationship(back_populates="precios")
-    # `passive_deletes` evita que el ORM intente anular libros.precio_id (que es
-    # NOT NULL) al borrar un precio: la integridad la controla la base de datos.
-    libro: Mapped[Optional["LibroModel"]] = relationship(
-        back_populates="precio", uselist=False, passive_deletes=True
-    )
+    libro: Mapped["LibroModel"] = relationship(back_populates="precios")
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return f"PrecioModel(id={self.id}, valor={self.valor})"
 
 
 class LibroModel(Base):
     """Tabla `libros`: catálogo de títulos.
 
-    El ISBN es la clave primaria natural. La relación con `precios` es uno a
-    uno, garantizada por la restricción de unicidad sobre `precio_id`.
+    La clave primaria es un id entero y el ISBN es único. Un libro tiene
+    muchos precios (uno por moneda) y a lo sumo un registro de stock.
     """
 
     __tablename__ = "libros"
-    __table_args__ = (
-        UniqueConstraint("precio_id", name="uq_libros_precio"),
-    )
 
-    isbn: Mapped[str] = mapped_column(String(20), primary_key=True)
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
+    isbn: Mapped[str] = mapped_column(String(20), nullable=False, unique=True)
     titulo: Mapped[str] = mapped_column(String(200), nullable=False)
     autor: Mapped[str] = mapped_column(String(150), nullable=False)
     editorial_id: Mapped[int] = mapped_column(
@@ -160,37 +182,39 @@ class LibroModel(Base):
     genero_id: Mapped[int] = mapped_column(
         ForeignKey("generos.id"), nullable=False, index=True
     )
-    precio_id: Mapped[int] = mapped_column(
-        ForeignKey("precios.id"), nullable=False
-    )
 
     editorial: Mapped["EditorialModel"] = relationship(
         back_populates="libros"
     )
     genero: Mapped["GeneroModel"] = relationship(back_populates="libros")
-    precio: Mapped["PrecioModel"] = relationship(back_populates="libro")
+    precios: Mapped[List["PrecioModel"]] = relationship(
+        back_populates="libro", cascade="all, delete-orphan"
+    )
     stock: Mapped[Optional["StockModel"]] = relationship(
-        back_populates="libro", uselist=False
+        back_populates="libro", uselist=False, cascade="all, delete-orphan"
     )
 
     def __repr__(self) -> str:
-        return f"LibroModel(isbn='{self.isbn}', titulo='{self.titulo}')"
+        """Devuelve una representación técnica del modelo."""
+        return f"LibroModel(id={self.id}, titulo='{self.titulo}')"
 
 
 class StockModel(Base):
-    """Tabla `stock`: cantidad disponible de cada libro (uno a uno por ISBN)."""
+    """Tabla `stock`: cantidad disponible de cada libro (uno a uno)."""
 
     __tablename__ = "stock"
     __table_args__ = (
-        UniqueConstraint("libro_isbn", name="uq_stock_libro"),
+        UniqueConstraint("libro_id", name="uq_stock_libro"),
         CheckConstraint(
             "cantidad >= 0", name="ck_stock_cantidad_no_negativa"
         ),
     )
 
-    id_stock: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
-    libro_isbn: Mapped[str] = mapped_column(
-        ForeignKey("libros.isbn"), nullable=False
+    id_stock: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
+    libro_id: Mapped[int] = mapped_column(
+        ForeignKey("libros.id"), nullable=False
     )
     cantidad: Mapped[int] = mapped_column(Integer, nullable=False)
     cantidad_minima: Mapped[int] = mapped_column(
@@ -200,6 +224,7 @@ class StockModel(Base):
     libro: Mapped["LibroModel"] = relationship(back_populates="stock")
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return (
             f"StockModel(id_stock={self.id_stock}, "
             f"cantidad={self.cantidad})"
@@ -224,7 +249,9 @@ class CotizacionDolarModel(Base):
         ),
     )
 
-    id_cotizacion: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=False)
+    id_cotizacion: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=False
+    )
     tipo_id: Mapped[int] = mapped_column(
         ForeignKey("tipos_cotizacion.id"), nullable=False, index=True
     )
@@ -241,6 +268,7 @@ class CotizacionDolarModel(Base):
     )
 
     def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
         return (
             f"CotizacionDolarModel(id_cotizacion={self.id_cotizacion}, "
             f"fecha={self.fecha})"

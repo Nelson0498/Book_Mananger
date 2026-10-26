@@ -1,5 +1,4 @@
-"""
-Migración de los datos del Sprint 1 a la base de datos relacional.
+"""Migración de los datos del Sprint 1 a la base de datos relacional.
 
 La estructura de las tablas se crea mediante SQLAlchemy a partir de los
 modelos definidos en models/models.py.
@@ -7,7 +6,7 @@ modelos definidos en models/models.py.
 Este módulo lee los archivos CSV de migrations/csv, genera scripts SQL
 con sentencias INSERT y los ejecuta en la base de datos.
 
-Los scripts SQL generados se guardan en migrations/sql/.
+Los scripts SQL generados se guardan en migrations/sql/ y se versionan.
 
 Las sentencias de inserción son idempotentes: utilizan ON CONFLICT DO NOTHING
 para evitar duplicar registros cuando se repite la migración.
@@ -43,27 +42,17 @@ CARPETA_CSV_POR_DEFECTO = os.path.join(
     _RAIZ_PROYECTO, "src", "book_manager", "migrations", "csv"
 )
 
-# Los scripts SQL generados se guardan en migrations/sql_datos_generados/.
-
-# Carpeta de scripts SQL para crear la estructura de la base de datos.
-CARPETA_SQL_ESTRUCTURA_POR_DEFECTO = os.path.join(
+# Carpeta de scripts SQL de datos, generados a partir de los CSV.
+CARPETA_SQL_POR_DEFECTO = os.path.join(
     _RAIZ_PROYECTO, "src", "book_manager", "migrations", "sql"
-)
-
-# Carpeta de scripts SQL generados a partir de los CSV.
-CARPETA_SQL_DATOS_POR_DEFECTO = os.path.join(
-    _RAIZ_PROYECTO,
-    "src",
-    "book_manager",
-    "migrations",
-    "sql_datos_generados",
 )
 
 
 # Sentencias de estructura que no deben ejecutarse durante la migración
 # de datos. La creación de tablas corresponde a SQLAlchemy.
 _PATRON_ESTRUCTURA = re.compile(
-    r"\b(CREATE|ALTER|DROP|TRUNCATE)\s+(TABLE|INDEX|SCHEMA|VIEW|SEQUENCE)",
+    r"\b(CREATE|ALTER|DROP|TRUNCATE)\s+"
+    r"(TABLE|INDEX|SCHEMA|VIEW|SEQUENCE)",
     re.IGNORECASE,
 )
 
@@ -77,7 +66,7 @@ FECHA = "fecha"
 
 @dataclass(frozen=True)
 class DefinicionTabla:
-    """Describe el archivo CSV, la tabla destino y los tipos de sus columnas."""
+    """Describe el CSV de origen, la tabla destino y los tipos de columnas."""
 
     tabla: str
     archivo_csv: str
@@ -112,29 +101,29 @@ DEFINICIONES_TABLAS: Tuple[DefinicionTabla, ...] = (
         tipos=(ENTERO, TEXTO),
     ),
     DefinicionTabla(
-        tabla="precios",
-        archivo_csv="precios.csv",
-        columnas=("id", "valor", "moneda_id"),
-        tipos=(ENTERO, DECIMAL, ENTERO),
-    ),
-    DefinicionTabla(
         tabla="libros",
         archivo_csv="libros.csv",
         columnas=(
+            "id",
             "isbn",
             "titulo",
             "autor",
             "editorial_id",
             "genero_id",
-            "precio_id",
         ),
-        tipos=(TEXTO, TEXTO, TEXTO, ENTERO, ENTERO, ENTERO),
+        tipos=(ENTERO, TEXTO, TEXTO, TEXTO, ENTERO, ENTERO),
+    ),
+    DefinicionTabla(
+        tabla="precios",
+        archivo_csv="precios.csv",
+        columnas=("id", "libro_id", "moneda_id", "valor"),
+        tipos=(ENTERO, ENTERO, ENTERO, DECIMAL),
     ),
     DefinicionTabla(
         tabla="stock",
         archivo_csv="stock.csv",
-        columnas=("id_stock", "libro_isbn", "cantidad", "cantidad_minima"),
-        tipos=(ENTERO, TEXTO, ENTERO, ENTERO),
+        columnas=("id_stock", "libro_id", "cantidad", "cantidad_minima"),
+        tipos=(ENTERO, ENTERO, ENTERO, ENTERO),
     ),
     DefinicionTabla(
         tabla="cotizaciones",
@@ -308,8 +297,28 @@ def _leer_sentencia(ruta_sql: str) -> str | None:
 
 
 def crear_tablas(conexion: ConexionDB) -> None:
-    """Crea las tablas que todavía no existan."""
+    """Crea las tablas que todavía no existan.
 
+    Args:
+        conexion: Conexión a la base de datos.
+    """
+
+    Base.metadata.create_all(conexion.engine)
+
+
+def recrear_tablas(conexion: ConexionDB) -> None:
+    """Elimina todas las tablas del sistema y las vuelve a crear.
+
+    `create_all` no altera las tablas que ya existen, por lo que al cambiar
+    el esquema (por ejemplo, de Sprint 2 a Sprint 3) hay que recrearlas.
+    Esta operación **borra todos los datos**: debe usarse solo con la
+    confirmación explícita del usuario.
+
+    Args:
+        conexion: Conexión a la base de datos.
+    """
+
+    Base.metadata.drop_all(conexion.engine)
     Base.metadata.create_all(conexion.engine)
 
 
@@ -361,7 +370,7 @@ def aplicar_migracion(
 def migrar_base_de_datos(
     conexion: ConexionDB,
     carpeta_csvs: str = CARPETA_CSV_POR_DEFECTO,
-    carpeta_sqls: str = CARPETA_SQL_DATOS_POR_DEFECTO,
+    carpeta_sqls: str = CARPETA_SQL_POR_DEFECTO,
 ) -> Dict[str, int]:
     """
     Crea las tablas, genera los scripts SQL y migra los datos.

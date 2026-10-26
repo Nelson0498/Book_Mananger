@@ -1,4 +1,3 @@
-
 """Administración de conexiones y transacciones de PostgreSQL."""
 
 import os
@@ -49,7 +48,8 @@ def normalizar_url(database_url: str) -> str:
         incluye o si no corresponde a PostgreSQL.
     """
     if database_url.startswith(_ESQUEMA_POSTGRES):
-        return _ESQUEMA_POSTGRES_PSYCOPG + database_url[len(_ESQUEMA_POSTGRES):]
+        resto = database_url[len(_ESQUEMA_POSTGRES):]
+        return _ESQUEMA_POSTGRES_PSYCOPG + resto
     return database_url
 
 
@@ -57,6 +57,15 @@ class ConexionDB:
     """Administra el motor y las sesiones de SQLAlchemy."""
 
     def __init__(self, database_url: str | None = None) -> None:
+        """Crea el motor de SQLAlchemy a partir de la URL de conexión.
+
+        Args:
+            database_url (str | None): URL de conexión. Si es None se usa la
+                variable de entorno DATABASE_URL.
+
+        Raises:
+            ValueError: Si no hay una URL de conexión disponible.
+        """
         url = normalizar_url(database_url or os.getenv("DATABASE_URL", ""))
 
         if not url:

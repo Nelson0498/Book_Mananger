@@ -13,6 +13,7 @@ from book_manager.entities.entities import (
     CotizacionDolar,
     Editorial,
     Genero,
+    Libro,
     Moneda,
     Precio,
     Stock,
@@ -209,7 +210,6 @@ def cargar_datos_iniciales(
     ]
 
     if not repositorio_libro.leer_todos():
-        from book_manager.entities.entities import Libro
         for isbn, titulo, autor, ed_id, gen_id, pre_id in libros_data:
             genero = repositorio_genero.leer_por_id(gen_id)
             editorial = repositorio_editorial.leer_por_id(ed_id)

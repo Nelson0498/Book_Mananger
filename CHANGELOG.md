@@ -1,3 +1,21 @@
+# Sprint 3
+
+[Ejercicio 01]
+- Creación de la rama `Sprint_3` a partir de `Sprint_2`.
+- Actualización de `README.md` con el objetivo, la introducción y el contexto del Sprint 3, la estructura, las variables de entorno y el historial de sprints.
+- Estructura del Sprint 3: carpeta `reportes/` y scripts de datos en `migrations/sql/`; se elimina `migrations/sql_datos_generados/`.
+- El archivo `.env` pasa a versionarse con las variables no secretas `API_URL` y `API_URL_MONEDAS`; `DATABASE_URL` queda fuera del repositorio.
+- Ampliación de `.gitignore` con los reportes generados (`*.xlsx`, `*.csv`), la caché de Scrapy y los `*.log`.
+- Incorporación de las dependencias `scrapy`, `pandas` y `openpyxl`.
+- Corrección Sprint 1 – Ej 02: `Stock` y `Precio` referencian al objeto `Libro` en lugar de un identificador, y `Libro` conoce sus precios y su stock.
+- Corrección Sprint 1 – Ej 03: `Libro` pasa a tener `id` entero y el stock se busca por `libro_id` (`leer_por_libro(libro_id: int)`).
+- Corrección Sprint 2 – Ej 04: relación Libro 1 — N Precio (un precio por moneda, `UNIQUE(libro_id, moneda_id)`) y eliminación de `libros.precio_id`; se actualizan los CSV de origen.
+- Corrección Sprint 2 – Ej 07: si la API informa una casa cuyo tipo de cotización no existe, el tipo se crea en lugar de fallar; `API_URL` se versiona en `.env`.
+- Corrección Sprint 2 – Ej 08: la lista bimonetaria admite cualquier moneda, el usuario elige el tipo de cotización del dólar y las demás monedas se toman de la API de cotizaciones (`API_URL_MONEDAS`); el CSV de precios tiene una columna por moneda.
+- Corrección Sprint 2 – Descuentos: imports solo al inicio de cada archivo y docstrings estilo Google en todos los módulos, clases y métodos.
+- Los repositorios SQLAlchemy pasan a llamarse `RepositorioGenero`, `RepositorioLibro`, etc., y se eliminan los repositorios CSV.
+- Nueva función `recrear_tablas()` para actualizar el esquema de una base creada en el Sprint 2.
+
 # Sprint 2
 
 [Ejercicio 08]

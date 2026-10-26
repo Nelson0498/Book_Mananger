@@ -1,5 +1,4 @@
-"""
-Interfaz de consola (CLI) para el sistema Book Manager.
+"""Interfaz de consola (CLI) para el sistema Book Manager.
 
 Presenta menús interactivos para realizar CRUD sobre todas las
 entidades del sistema.  Toda la lógica de negocio se delega a
@@ -10,24 +9,11 @@ usuario, llamar al servicio correspondiente y mostrar resultados.
 import csv
 import datetime
 import os
-from typing import Optional
+from typing import Dict, List, Optional
+
+from pydantic import ValidationError
 
 from book_manager.entities.entities import CotizacionDolar
-from book_manager.services.services import (
-    EntidadNoEncontradaError,
-    ErrorServicio,
-    OperacionInvalidaError,
-    ServicioCotizacionDolar,
-    ServicioEditorial,
-    ServicioGenero,
-    ServicioLibro,
-    ServicioMoneda,
-    ServicioPrecio,
-    ServicioStock,
-    ServicioTipoCotizacion,
-    TIPO_COTIZACION_OFICIAL,
-)
-from pydantic import ValidationError
 from book_manager.schemas.schemas import (
     CotizacionDolarInput,
     CotizacionDolarUpdateInput,
@@ -41,27 +27,33 @@ from book_manager.schemas.schemas import (
     MonedaInput,
     MonedaUpdateInput,
     PrecioInput,
+    PrecioLibroInput,
     PrecioUpdateInput,
     StockInput,
     StockMovimientoInput,
     TipoCotizacionInput,
     TipoCotizacionUpdateInput,
 )
+from book_manager.services.services import (
+    CARPETA_REPORTES,
+    EntidadNoEncontradaError,
+    ErrorServicio,
+    MONEDA_BASE,
+    ServicioCotizacionDolar,
+    ServicioEditorial,
+    ServicioGenero,
+    ServicioLibro,
+    ServicioMoneda,
+    ServicioPrecio,
+    ServicioStock,
+    ServicioTipoCotizacion,
+    TIPO_COTIZACION_OFICIAL,
+)
 
 
 # ---------------------------------------------------------------------------
 # Helpers de entrada
 # ---------------------------------------------------------------------------
-
-# Raíz del proyecto: ui/ -> book_manager/ -> src/ -> raíz.
-_RAIZ_PROYECTO = os.path.abspath(
-    os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "..", "..")
-)
-
-# Carpeta donde se guardan los archivos generados por la aplicación.
-# Está excluida de Git mediante .gitignore.
-CARPETA_EXPORTACION_POR_DEFECTO = os.path.join(_RAIZ_PROYECTO, "exports")
-
 
 def pedir_entero(mensaje: str) -> int:
     """Pide al usuario un número entero, reintentando ante errores."""
@@ -145,6 +137,20 @@ class Consola:
         svc_libro: ServicioLibro,
         svc_cotizacion: ServicioCotizacionDolar,
     ) -> None:
+        """Crea la consola con los servicios que utiliza.
+
+        Args:
+            svc_genero (ServicioGenero): Servicio de géneros.
+            svc_editorial (ServicioEditorial): Servicio de editoriales.
+            svc_moneda (ServicioMoneda): Servicio de monedas.
+            svc_tipo_cotizacion (ServicioTipoCotizacion): Servicio de tipos
+                de cotización.
+            svc_precio (ServicioPrecio): Servicio de precios.
+            svc_stock (ServicioStock): Servicio de stock.
+            svc_libro (ServicioLibro): Servicio de libros.
+            svc_cotizacion (ServicioCotizacionDolar): Servicio de
+                cotizaciones del dólar.
+        """
         self._svc_genero = svc_genero
         self._svc_editorial = svc_editorial
         self._svc_moneda = svc_moneda
@@ -216,6 +222,7 @@ class Consola:
     # ==================================================================
 
     def _menu_generos(self) -> None:
+        """Muestra el menú de géneros y ejecuta la opción elegida."""
         while True:
             mostrar_titulo("GÉNEROS")
             print("  1. Crear")
@@ -248,6 +255,7 @@ class Consola:
             pausar()
 
     def _crear_genero(self) -> None:
+        """Pide los datos y crea un género."""
         print("\n  --- Crear Género ---")
         id_genero = pedir_entero("  ID: ")
         nombre = pedir_texto("  Nombre: ")
@@ -256,6 +264,7 @@ class Consola:
         print(f"\n  Género creado: {genero}")
 
     def _listar_generos(self) -> None:
+        """Lista géneros."""
         print("\n  --- Listado de Géneros ---")
         generos = self._svc_genero.listar()
         if not generos:
@@ -265,12 +274,14 @@ class Consola:
             print(f"  ID: {g.id_genero} | Nombre: {g.nombre}")
 
     def _buscar_genero(self) -> None:
+        """Busca un género por su ID y lo muestra."""
         print("\n  --- Buscar Género ---")
         id_genero = pedir_entero("  ID: ")
         genero = self._svc_genero.obtener(id_genero)
         print(f"\n  ID: {genero.id_genero} | Nombre: {genero.nombre}")
 
     def _modificar_genero(self) -> None:
+        """Pide los datos y modifica un género."""
         print("\n  --- Modificar Género ---")
         id_genero = pedir_entero("  ID del género a modificar: ")
         nuevo_nombre = pedir_texto("  Nuevo nombre: ")
@@ -283,6 +294,7 @@ class Consola:
         print(f"\n  Género actualizado: {genero}")
 
     def _eliminar_genero(self) -> None:
+        """Pide el ID y elimina un género."""
         print("\n  --- Eliminar Género ---")
         id_genero = pedir_entero("  ID del género a eliminar: ")
         self._svc_genero.eliminar(id_genero)
@@ -293,6 +305,7 @@ class Consola:
     # ==================================================================
 
     def _menu_editoriales(self) -> None:
+        """Muestra el menú de editoriales y ejecuta la opción elegida."""
         while True:
             mostrar_titulo("EDITORIALES")
             print("  1. Crear")
@@ -325,6 +338,7 @@ class Consola:
             pausar()
 
     def _crear_editorial(self) -> None:
+        """Pide los datos y crea una editorial."""
         print("\n  --- Crear Editorial ---")
         id_editorial = pedir_entero("  ID: ")
         nombre = pedir_texto("  Nombre: ")
@@ -338,6 +352,7 @@ class Consola:
         print(f"\n  Editorial creada: {editorial}")
 
     def _listar_editoriales(self) -> None:
+        """Lista editoriales."""
         print("\n  --- Listado de Editoriales ---")
         editoriales = self._svc_editorial.listar()
         if not editoriales:
@@ -348,6 +363,7 @@ class Consola:
             print(f"  ID: {e.id_editorial} | {e.nombre} | País: {pais}")
 
     def _buscar_editorial(self) -> None:
+        """Busca una editorial por su ID y lo muestra."""
         print("\n  --- Buscar Editorial ---")
         id_editorial = pedir_entero("  ID: ")
         editorial = self._svc_editorial.obtener(id_editorial)
@@ -356,6 +372,7 @@ class Consola:
               f" | País: {pais}")
 
     def _modificar_editorial(self) -> None:
+        """Pide los datos y modifica una editorial."""
         print("\n  --- Modificar Editorial ---")
         id_editorial = pedir_entero("  ID de la editorial a modificar: ")
         print("  (Deje vacío para no modificar)")
@@ -370,6 +387,7 @@ class Consola:
         print(f"\n  Editorial actualizada: {editorial}")
 
     def _eliminar_editorial(self) -> None:
+        """Pide el ID y elimina una editorial."""
         print("\n  --- Eliminar Editorial ---")
         id_editorial = pedir_entero("  ID de la editorial a eliminar: ")
         self._svc_editorial.eliminar(id_editorial)
@@ -380,6 +398,7 @@ class Consola:
     # ==================================================================
 
     def _menu_monedas(self) -> None:
+        """Muestra el menú de monedas y ejecuta la opción elegida."""
         while True:
             mostrar_titulo("MONEDAS")
             print("  1. Crear")
@@ -412,6 +431,7 @@ class Consola:
             pausar()
 
     def _crear_moneda(self) -> None:
+        """Pide los datos y crea una moneda."""
         print("\n  --- Crear Moneda ---")
         id_moneda = pedir_entero("  ID: ")
         codigo = pedir_texto("  Código (ej: USD): ")
@@ -428,6 +448,7 @@ class Consola:
         print(f"\n  Moneda creada: {moneda}")
 
     def _listar_monedas(self) -> None:
+        """Lista monedas."""
         print("\n  --- Listado de Monedas ---")
         monedas = self._svc_moneda.listar()
         if not monedas:
@@ -438,6 +459,7 @@ class Consola:
                   f" | {m.simbolo}")
 
     def _buscar_moneda(self) -> None:
+        """Busca una moneda por su ID y lo muestra."""
         print("\n  --- Buscar Moneda ---")
         id_moneda = pedir_entero("  ID: ")
         moneda = self._svc_moneda.obtener(id_moneda)
@@ -445,6 +467,7 @@ class Consola:
               f" | {moneda.nombre} | {moneda.simbolo}")
 
     def _modificar_moneda(self) -> None:
+        """Pide los datos y modifica una moneda."""
         print("\n  --- Modificar Moneda ---")
         id_moneda = pedir_entero("  ID de la moneda a modificar: ")
         print("  (Deje vacío para no modificar)")
@@ -459,6 +482,7 @@ class Consola:
         print(f"\n  Moneda actualizada: {moneda}")
 
     def _eliminar_moneda(self) -> None:
+        """Pide el ID y elimina una moneda."""
         print("\n  --- Eliminar Moneda ---")
         id_moneda = pedir_entero("  ID de la moneda a eliminar: ")
         self._svc_moneda.eliminar(id_moneda)
@@ -469,18 +493,20 @@ class Consola:
     # ==================================================================
 
     def _menu_precios(self) -> None:
+        """Muestra el menú de precios y ejecuta la opción elegida."""
         while True:
             mostrar_titulo("PRECIOS")
-            print("  1. Crear")
-            print("  2. Listar")
-            print("  3. Buscar por ID")
-            print("  4. Modificar")
-            print("  5. Eliminar")
+            print("  1. Agregar precio a un libro")
+            print("  2. Listar todos")
+            print("  3. Listar precios de un libro")
+            print("  4. Buscar por ID")
+            print("  5. Modificar")
+            print("  6. Eliminar")
             print("  0. Volver")
 
             opcion = pedir_opcion(
                 "\n  Seleccione una opción: ",
-                ["0", "1", "2", "3", "4", "5"],
+                ["0", "1", "2", "3", "4", "5", "6"],
             )
 
             try:
@@ -489,10 +515,12 @@ class Consola:
                 elif opcion == "2":
                     self._listar_precios()
                 elif opcion == "3":
-                    self._buscar_precio()
+                    self._listar_precios_de_libro()
                 elif opcion == "4":
-                    self._modificar_precio()
+                    self._buscar_precio()
                 elif opcion == "5":
+                    self._modificar_precio()
+                elif opcion == "6":
                     self._eliminar_precio()
                 elif opcion == "0":
                     break
@@ -501,39 +529,56 @@ class Consola:
             pausar()
 
     def _crear_precio(self) -> None:
-        print("\n  --- Crear Precio ---")
+        """Pide los datos y crea un precio."""
+        print("\n  --- Agregar Precio a un Libro ---")
+        libro_id = pedir_entero("  ID del libro: ")
         print("  Monedas disponibles:")
         for m in self._svc_moneda.listar():
-            print(f"    ID: {m.id_moneda} | {m.codigo} – {m.nombre}")
-        id_precio = pedir_entero("  ID del precio: ")
+            print(f"    {m.codigo} – {m.nombre}")
+        codigo = pedir_texto("  Código de la moneda: ")
         valor = pedir_float("  Valor: ")
-        moneda_id = pedir_entero("  ID de la moneda: ")
         datos = PrecioInput(
-            id_precio=id_precio, valor=valor, moneda_id=moneda_id,
+            libro_id=libro_id, codigo_moneda=codigo, valor=valor,
         )
-        precio = self._svc_precio.crear(
-            datos.id_precio, datos.valor, datos.moneda_id,
+        precio = self._svc_precio.agregar(
+            datos.libro_id, datos.codigo_moneda, datos.valor,
         )
         print(f"\n  Precio creado: {precio}")
 
     def _listar_precios(self) -> None:
+        """Lista precios."""
         print("\n  --- Listado de Precios ---")
         precios = self._svc_precio.listar()
         if not precios:
             print("  No hay precios registrados.")
             return
         for p in precios:
-            print(f"  ID: {p.id_precio} | {p.valor:.2f}"
-                  f" {p.moneda.codigo}")
+            print(f"  ID: {p.id_precio} | Libro: {p.libro.id_libro}"
+                  f" | {p.valor:.2f} {p.moneda.codigo}")
+
+    def _listar_precios_de_libro(self) -> None:
+        """Lista los precios de un libro."""
+        print("\n  --- Precios de un Libro ---")
+        libro_id = pedir_entero("  ID del libro: ")
+        precios = self._svc_precio.listar_por_libro(libro_id)
+        if not precios:
+            print("  El libro no tiene precios registrados.")
+            return
+        for p in precios:
+            print(f"  ID: {p.id_precio} | {p.valor:.2f} {p.moneda.codigo}"
+                  f" ({p.moneda.nombre})")
 
     def _buscar_precio(self) -> None:
+        """Busca un precio por su ID y lo muestra."""
         print("\n  --- Buscar Precio ---")
         id_precio = pedir_entero("  ID: ")
         precio = self._svc_precio.obtener(id_precio)
-        print(f"\n  ID: {precio.id_precio} | {precio.valor:.2f}"
-              f" {precio.moneda.codigo} ({precio.moneda.nombre})")
+        print(f"\n  ID: {precio.id_precio} | Libro: {precio.libro.titulo}"
+              f" | {precio.valor:.2f} {precio.moneda.codigo}"
+              f" ({precio.moneda.nombre})")
 
     def _modificar_precio(self) -> None:
+        """Pide los datos y modifica un precio."""
         print("\n  --- Modificar Precio ---")
         id_precio = pedir_entero("  ID del precio a modificar: ")
         nuevo_valor = pedir_float("  Nuevo valor: ")
@@ -546,6 +591,7 @@ class Consola:
         print(f"\n  Precio actualizado: {precio}")
 
     def _eliminar_precio(self) -> None:
+        """Pide el ID y elimina un precio."""
         print("\n  --- Eliminar Precio ---")
         id_precio = pedir_entero("  ID del precio a eliminar: ")
         self._svc_precio.eliminar(id_precio)
@@ -556,10 +602,11 @@ class Consola:
     # ==================================================================
 
     def _menu_stock(self) -> None:
+        """Muestra el menú de stock y ejecuta la opción elegida."""
         while True:
             mostrar_titulo("STOCK")
             print("  1. Crear")
-            print("  2. Consultar por ISBN")
+            print("  2. Consultar por ID de libro")
             print("  3. Listar todos")
             print("  4. Registrar ingreso")
             print("  5. Registrar egreso")
@@ -594,31 +641,34 @@ class Consola:
             pausar()
 
     def _crear_stock(self) -> None:
+        """Pide los datos y crea un registro de stock."""
         print("\n  --- Crear Stock ---")
         id_stock = pedir_entero("  ID del stock: ")
-        isbn = pedir_texto("  ISBN del libro: ")
+        libro_id = pedir_entero("  ID del libro: ")
         cantidad = pedir_entero("  Cantidad inicial: ")
         cantidad_minima = pedir_entero("  Cantidad mínima: ")
         datos = StockInput(
-            id_stock=id_stock, libro_isbn=isbn,
+            id_stock=id_stock, libro_id=libro_id,
             cantidad=cantidad, cantidad_minima=cantidad_minima,
         )
         stock = self._svc_stock.crear(
-            datos.id_stock, datos.libro_isbn,
+            datos.id_stock, datos.libro_id,
             datos.cantidad, datos.cantidad_minima,
         )
         print(f"\n  Stock creado: {stock}")
 
     def _consultar_stock(self) -> None:
+        """Consulta el stock de un libro."""
         print("\n  --- Consultar Stock ---")
-        isbn = pedir_texto("  ISBN del libro: ")
-        stock = self._svc_stock.obtener(isbn)
-        print(f"\n  ISBN: {stock.libro_isbn}")
+        libro_id = pedir_entero("  ID del libro: ")
+        stock = self._svc_stock.obtener(libro_id)
+        print(f"\n  Libro: {stock.libro.id_libro} | {stock.libro.titulo}")
         print(f"  Cantidad: {stock.cantidad}")
         print(f"  Cantidad mínima: {stock.cantidad_minima}")
         print(f"  Stock bajo: {'Sí' if stock.hay_stock_bajo() else 'No'}")
 
     def _listar_stocks(self) -> None:
+        """Lista los registros de stock."""
         print("\n  --- Listado de Stock ---")
         stocks = self._svc_stock.listar()
         if not stocks:
@@ -626,57 +676,63 @@ class Consola:
             return
         for s in stocks:
             alerta = " ⚠ BAJO" if s.hay_stock_bajo() else ""
-            print(f"  ISBN: {s.libro_isbn} | Cant: {s.cantidad}"
+            print(f"  Libro: {s.libro.id_libro} | {s.libro.titulo[:30]}"
+                  f" | Cant: {s.cantidad}"
                   f" | Min: {s.cantidad_minima}{alerta}")
 
     def _registrar_ingreso(self) -> None:
+        """Pide los datos y registra un ingreso de stock."""
         print("\n  --- Registrar Ingreso ---")
-        isbn = pedir_texto("  ISBN del libro: ")
+        libro_id = pedir_entero("  ID del libro: ")
         cantidad = pedir_entero("  Cantidad a ingresar: ")
-        datos = StockMovimientoInput(libro_isbn=isbn, cantidad=cantidad)
+        datos = StockMovimientoInput(libro_id=libro_id, cantidad=cantidad)
         stock = self._svc_stock.registrar_ingreso(
-            datos.libro_isbn, datos.cantidad,
+            datos.libro_id, datos.cantidad,
         )
         print(f"\n  Ingreso registrado. Stock actual: {stock.cantidad}")
 
     def _registrar_egreso(self) -> None:
+        """Pide los datos y registra un egreso de stock."""
         print("\n  --- Registrar Egreso ---")
-        isbn = pedir_texto("  ISBN del libro: ")
+        libro_id = pedir_entero("  ID del libro: ")
         cantidad = pedir_entero("  Cantidad a retirar: ")
-        datos = StockMovimientoInput(libro_isbn=isbn, cantidad=cantidad)
+        datos = StockMovimientoInput(libro_id=libro_id, cantidad=cantidad)
         stock = self._svc_stock.registrar_egreso(
-            datos.libro_isbn, datos.cantidad,
+            datos.libro_id, datos.cantidad,
         )
         print(f"\n  Egreso registrado. Stock actual: {stock.cantidad}")
 
     def _alerta_stock_bajo(self) -> None:
+        """Consulta si el stock de un libro está bajo el mínimo."""
         print("\n  --- Alerta de Stock Bajo ---")
-        isbn = pedir_texto("  ISBN del libro: ")
-        alerta = self._svc_stock.hay_alerta_stock_bajo(isbn)
+        libro_id = pedir_entero("  ID del libro: ")
+        alerta = self._svc_stock.hay_alerta_stock_bajo(libro_id)
         if alerta:
             print("\n  ⚠ ALERTA: el stock está bajo el mínimo.")
         else:
             print("\n  El stock está dentro de los niveles normales.")
 
     def _eliminar_stock(self) -> None:
+        """Pide el ID y elimina un registro de stock."""
         print("\n  --- Eliminar Stock ---")
-        isbn = pedir_texto("  ISBN del libro: ")
-        eliminado = self._svc_stock.eliminar(isbn)
+        libro_id = pedir_entero("  ID del libro: ")
+        eliminado = self._svc_stock.eliminar(libro_id)
         if eliminado:
             print("\n  Stock eliminado correctamente.")
         else:
-            print("\n  No se encontró stock para ese ISBN.")
+            print("\n  No se encontró stock para ese libro.")
 
     # ==================================================================
     # Libros
     # ==================================================================
 
     def _menu_libros(self) -> None:
+        """Muestra el menú de libros y ejecuta la opción elegida."""
         while True:
             mostrar_titulo("LIBROS")
             print("  1. Crear")
             print("  2. Listar")
-            print("  3. Buscar por ISBN")
+            print("  3. Buscar por ID")
             print("  4. Modificar datos")
             print("  5. Modificar precio")
             print("  6. Eliminar")
@@ -706,9 +762,36 @@ class Consola:
                 print(f"\n  Error: {e}")
             pausar()
 
+    def _pedir_precios_libro(self) -> List[PrecioLibroInput]:
+        """Pide el precio en pesos y los de otras monedas de un libro."""
+        print("\n  Monedas disponibles:")
+        for m in self._svc_moneda.listar():
+            print(f"    {m.codigo} – {m.nombre}")
+
+        precios = [PrecioLibroInput(
+            codigo_moneda=MONEDA_BASE,
+            valor=pedir_float(f"  Precio en {MONEDA_BASE}: "),
+        )]
+        usadas = {MONEDA_BASE}
+        while pedir_opcion(
+            "  ¿Agregar precio en otra moneda? (s/n): ", ["s", "n"]
+        ) == "s":
+            codigo = pedir_texto("  Código de la moneda: ").upper()
+            if codigo in usadas:
+                print(f"  Error: ya se cargó un precio en {codigo}.")
+                continue
+            precios.append(PrecioLibroInput(
+                codigo_moneda=codigo,
+                valor=pedir_float(f"  Precio en {codigo}: "),
+            ))
+            usadas.add(codigo)
+        return precios
+
     def _crear_libro(self) -> None:
+        """Pide los datos y crea un libro."""
         print("\n  --- Crear Libro ---")
 
+        id_libro = pedir_entero("  ID del libro: ")
         isbn = pedir_texto("  ISBN: ")
         titulo = pedir_texto("  Título: ")
         autor = pedir_texto("  Autor: ")
@@ -723,97 +806,106 @@ class Consola:
             print(f"    ID: {e.id_editorial} | {e.nombre}")
         editorial_id = pedir_entero("  ID de la editorial: ")
 
-        print("\n  Monedas disponibles:")
-        for m in self._svc_moneda.listar():
-            print(f"    ID: {m.id_moneda} | {m.codigo} – {m.nombre}")
-        moneda_id = pedir_entero("  ID de la moneda: ")
+        precios = self._pedir_precios_libro()
 
-        precio_id = pedir_entero("  ID para el nuevo precio: ")
-        precio_valor = pedir_float("  Valor del precio: ")
-
-        stock_id = pedir_entero("  ID para el stock: ")
         cantidad_inicial = pedir_entero("  Cantidad inicial de stock: ")
         cantidad_minima = pedir_entero("  Cantidad mínima de stock: ")
 
         datos = LibroInput(
-            isbn=isbn, titulo=titulo, autor=autor,
+            id_libro=id_libro, isbn=isbn, titulo=titulo, autor=autor,
             editorial_id=editorial_id, genero_id=genero_id,
-            precio_id=precio_id, precio_valor=precio_valor,
-            moneda_id=moneda_id,
-            stock_id=stock_id, cantidad_inicial=cantidad_inicial,
+            precios=precios,
+            cantidad_inicial=cantidad_inicial,
             cantidad_minima=cantidad_minima,
         )
 
         libro = self._svc_libro.crear(
-            isbn=datos.isbn, titulo=datos.titulo, autor=datos.autor,
-            editorial_id=datos.editorial_id, genero_id=datos.genero_id,
-            precio_id=datos.precio_id, precio_valor=datos.precio_valor,
-            moneda_id=datos.moneda_id,
-            stock_id=datos.stock_id,
-            cantidad_inicial=datos.cantidad_inicial,
+            id_libro=datos.id_libro, isbn=datos.isbn, titulo=datos.titulo,
+            autor=datos.autor, genero_id=datos.genero_id,
+            editorial_id=datos.editorial_id,
+            precios=[(p.codigo_moneda, p.valor) for p in datos.precios],
+            cantidad=datos.cantidad_inicial,
             cantidad_minima=datos.cantidad_minima,
         )
         print(f"\n  Libro creado: {libro}")
 
     def _listar_libros(self) -> None:
+        """Lista libros."""
         print("\n  --- Listado de Libros ---")
         libros = self._svc_libro.listar()
         if not libros:
             print("  No hay libros registrados.")
             return
         for libro in libros:
-            print(f"  ISBN: {libro.isbn} | {libro.titulo}"
-                  f" | {libro.autor}"
-                  f" | {libro.precio}"
-                  f" | Stock: {libro.stock.cantidad}")
+            precios = " / ".join(str(p) for p in libro.precios)
+            cantidad = libro.stock.cantidad if libro.stock else 0
+            print(f"  ID: {libro.id_libro} | {libro.isbn} | {libro.titulo}"
+                  f" | {libro.autor} | {precios} | Stock: {cantidad}")
 
     def _buscar_libro(self) -> None:
+        """Busca un libro por su ID y lo muestra."""
         print("\n  --- Buscar Libro ---")
-        isbn = pedir_texto("  ISBN: ")
-        libro = self._svc_libro.obtener(isbn)
-        print(f"\n  ISBN:      {libro.isbn}")
+        id_libro = pedir_entero("  ID: ")
+        libro = self._svc_libro.obtener(id_libro)
+        print(f"\n  ID:        {libro.id_libro}")
+        print(f"  ISBN:      {libro.isbn}")
         print(f"  Título:    {libro.titulo}")
         print(f"  Autor:     {libro.autor}")
         print(f"  Editorial: {libro.editorial.nombre}")
         print(f"  Género:    {libro.genero.nombre}")
-        print(f"  Precio:    {libro.precio}")
-        print(f"  Stock:     {libro.stock.cantidad} "
-              f"(mín: {libro.stock.cantidad_minima})")
+        for precio in libro.precios:
+            print(f"  Precio:    {precio}")
+        if libro.stock is not None:
+            print(f"  Stock:     {libro.stock.cantidad} "
+                  f"(mín: {libro.stock.cantidad_minima})")
 
     def _modificar_libro(self) -> None:
+        """Pide los datos y modifica un libro."""
         print("\n  --- Modificar Libro ---")
-        isbn = pedir_texto("  ISBN del libro a modificar: ")
+        id_libro = pedir_entero("  ID del libro a modificar: ")
         print("  (Deje vacío para no modificar)")
+        isbn = pedir_texto_opcional("  Nuevo ISBN: ")
         titulo = pedir_texto_opcional("  Nuevo título: ")
         autor = pedir_texto_opcional("  Nuevo autor: ")
-        datos = LibroUpdateInput(isbn=isbn, titulo=titulo, autor=autor)
+        datos = LibroUpdateInput(
+            id_libro=id_libro, isbn=isbn, titulo=titulo, autor=autor,
+        )
         libro = self._svc_libro.actualizar_datos(
-            datos.isbn, titulo=datos.titulo, autor=datos.autor,
+            datos.id_libro, titulo=datos.titulo, autor=datos.autor,
+            isbn=datos.isbn,
         )
         print(f"\n  Libro actualizado: {libro}")
 
     def _modificar_precio_libro(self) -> None:
+        """Pide los datos y modifica el precio de un libro."""
         print("\n  --- Modificar Precio del Libro ---")
-        isbn = pedir_texto("  ISBN del libro: ")
+        id_libro = pedir_entero("  ID del libro: ")
+        codigo = pedir_texto("  Código de la moneda del precio: ")
         nuevo_valor = pedir_float("  Nuevo valor del precio: ")
-        datos = LibroPrecioUpdateInput(isbn=isbn, nuevo_valor=nuevo_valor)
-        libro = self._svc_libro.actualizar_precio(
-            datos.isbn, datos.nuevo_valor,
+        datos = LibroPrecioUpdateInput(
+            id_libro=id_libro, codigo_moneda=codigo,
+            nuevo_valor=nuevo_valor,
         )
-        print(f"\n  Precio actualizado: {libro.precio}")
+        libro = self._svc_libro.actualizar_precio(
+            datos.id_libro, datos.codigo_moneda, datos.nuevo_valor,
+        )
+        precios = ", ".join(str(p) for p in libro.precios)
+        print(f"\n  Precios actualizados: {precios}")
 
     def _eliminar_libro(self) -> None:
+        """Pide el ID y elimina un libro."""
         print("\n  --- Eliminar Libro ---")
-        isbn = pedir_texto("  ISBN del libro a eliminar: ")
-        self._svc_libro.eliminar(isbn)
+        id_libro = pedir_entero("  ID del libro a eliminar: ")
+        self._svc_libro.eliminar(id_libro)
         print("\n  Libro eliminado correctamente "
-              "(junto con su precio y stock).")
+              "(junto con sus precios y su stock).")
 
     # ==================================================================
     # Tipos de Cotización
     # ==================================================================
 
     def _menu_tipos_cotizacion(self) -> None:
+        """Muestra el menú de tipos de cotización y ejecuta la opción."""
         while True:
             mostrar_titulo("TIPOS DE COTIZACIÓN")
             print("  1. Crear")
@@ -846,6 +938,7 @@ class Consola:
             pausar()
 
     def _crear_tipo_cotizacion(self) -> None:
+        """Pide los datos y crea un tipo de cotización."""
         print("\n  --- Crear Tipo de Cotización ---")
         id_tipo = pedir_entero("  ID: ")
         nombre = pedir_texto("  Nombre: ")
@@ -854,6 +947,7 @@ class Consola:
         print(f"\n  Tipo creado: {tipo}")
 
     def _listar_tipos_cotizacion(self) -> None:
+        """Lista tipos de cotización."""
         print("\n  --- Listado de Tipos de Cotización ---")
         tipos = self._svc_tipo_cotizacion.listar()
         if not tipos:
@@ -863,12 +957,14 @@ class Consola:
             print(f"  ID: {t.id_tipo} | {t.nombre}")
 
     def _buscar_tipo_cotizacion(self) -> None:
+        """Busca un tipo de cotización por su ID y lo muestra."""
         print("\n  --- Buscar Tipo de Cotización ---")
         id_tipo = pedir_entero("  ID: ")
         tipo = self._svc_tipo_cotizacion.obtener(id_tipo)
         print(f"\n  ID: {tipo.id_tipo} | Nombre: {tipo.nombre}")
 
     def _modificar_tipo_cotizacion(self) -> None:
+        """Pide los datos y modifica un tipo de cotización."""
         print("\n  --- Modificar Tipo de Cotización ---")
         id_tipo = pedir_entero("  ID del tipo a modificar: ")
         nuevo_nombre = pedir_texto("  Nuevo nombre: ")
@@ -881,6 +977,7 @@ class Consola:
         print(f"\n  Tipo actualizado: {tipo}")
 
     def _eliminar_tipo_cotizacion(self) -> None:
+        """Pide el ID y elimina un tipo de cotización."""
         print("\n  --- Eliminar Tipo de Cotización ---")
         id_tipo = pedir_entero("  ID del tipo a eliminar: ")
         self._svc_tipo_cotizacion.eliminar(id_tipo)
@@ -891,6 +988,7 @@ class Consola:
     # ==================================================================
 
     def _menu_cotizaciones(self) -> None:
+        """Muestra el menú de cotizaciones del dólar y ejecuta la opción."""
         while True:
             mostrar_titulo("COTIZACIONES DEL DÓLAR")
             print("  1. Registrar")
@@ -923,6 +1021,7 @@ class Consola:
             pausar()
 
     def _registrar_cotizacion(self) -> None:
+        """Pide los datos y registra una cotización del dólar."""
         print("\n  --- Registrar Cotización ---")
         print("  Tipos disponibles:")
         for t in self._svc_tipo_cotizacion.listar():
@@ -944,6 +1043,7 @@ class Consola:
         print(f"\n  Cotización registrada: {cotizacion}")
 
     def _cotizacion_vigente(self) -> None:
+        """Muestra la cotización vigente de un tipo."""
         print("\n  --- Cotización Vigente ---")
         print("  Tipos disponibles:")
         for t in self._svc_tipo_cotizacion.listar():
@@ -953,6 +1053,7 @@ class Consola:
         print(f"\n  {cotizacion}")
 
     def _historico_cotizacion(self) -> None:
+        """Muestra el histórico de cotizaciones de un tipo."""
         print("\n  --- Histórico de Cotizaciones ---")
         print("  Tipos disponibles:")
         for t in self._svc_tipo_cotizacion.listar():
@@ -967,6 +1068,7 @@ class Consola:
                   f" | Venta: {c.valor_venta:.2f}")
 
     def _modificar_cotizacion(self) -> None:
+        """Pide los datos y modifica una cotización del dólar."""
         print("\n  --- Modificar Cotización ---")
         print("  Tipos disponibles:")
         for t in self._svc_tipo_cotizacion.listar():
@@ -1000,6 +1102,7 @@ class Consola:
         print(f"\n  Cotización actualizada: {resultado}")
 
     def _eliminar_cotizacion(self) -> None:
+        """Pide el ID y elimina una cotización del dólar."""
         print("\n  --- Eliminar Cotización ---")
         tipo_id = pedir_entero("  ID del tipo: ")
         fecha = pedir_fecha("  Fecha (AAAA-MM-DD): ")
@@ -1010,12 +1113,13 @@ class Consola:
             print("\n  No se encontró cotización para ese tipo y fecha.")
 
     # ==================================================================
-    # Reportes del Sprint 2
+    # Reportes de precios
     # ==================================================================
 
     def _obtener_cotizaciones_api(self) -> None:
         """Consulta la API del dólar y registra las cotizaciones obtenidas."""
         print("\n  --- Obtener Cotizaciones por API ---")
+        tipos_previos = {t.nombre for t in self._svc_tipo_cotizacion.listar()}
         cotizaciones = self._svc_cotizacion.obtener_cotizaciones()
 
         print(f"\n  Cotizaciones registradas: {len(cotizaciones)}")
@@ -1023,75 +1127,139 @@ class Consola:
             print(f"    {c.tipo.nombre:<12} compra {c.valor_compra:>10.2f}"
                   f" | venta {c.valor_venta:>10.2f} | {c.fecha}")
 
+        nuevos = sorted({
+            c.tipo.nombre for c in cotizaciones
+        } - tipos_previos)
+        if nuevos:
+            print(f"\n  Tipos de cotización creados: {', '.join(nuevos)}")
+
         print("\n  Si un tipo ya tenía cotización para esa fecha, se actualizó"
               " en lugar de duplicarse.")
 
-    def _cotizacion_oficial(self) -> CotizacionDolar:
-        """Devuelve la cotización Oficial vigente que usan los reportes."""
-        return self._svc_cotizacion.obtener_vigente_por_nombre(
-            TIPO_COTIZACION_OFICIAL
+    def _elegir_cotizacion_usd(self) -> CotizacionDolar:
+        """Pide al usuario el tipo de cotización que fija el valor del USD.
+
+        Returns:
+            CotizacionDolar: La cotización vigente del tipo elegido.
+
+        Raises:
+            EntidadNoEncontradaError: Si no hay cotizaciones registradas.
+        """
+        vigentes = self._svc_cotizacion.listar_vigentes()
+        if not vigentes:
+            raise EntidadNoEncontradaError(
+                "No hay cotizaciones registradas. Use la opción 9 para "
+                "obtenerlas por API."
+            )
+
+        por_defecto = next(
+            (c for c in vigentes
+             if c.tipo.nombre.lower() == TIPO_COTIZACION_OFICIAL.lower()),
+            vigentes[0],
         )
+        print("\n  Tipos de cotización con valor vigente:")
+        for c in vigentes:
+            print(f"    ID: {c.tipo.id_tipo} | {c.tipo.nombre:<10}"
+                  f" venta {c.valor_venta:>10.2f} ({c.fecha})")
+
+        por_id = {c.tipo.id_tipo: c for c in vigentes}
+        while True:
+            texto = pedir_texto(
+                f"  ID del tipo para el USD [Enter = "
+                f"{por_defecto.tipo.nombre}]: ",
+                permitir_vacio=True,
+            )
+            if not texto:
+                return por_defecto
+            if texto.isdigit() and int(texto) in por_id:
+                return por_id[int(texto)]
+            print("  Error: elija uno de los IDs listados.")
+
+    def _obtener_tasas(self, cotizacion_usd: CotizacionDolar
+                       ) -> Dict[str, float]:
+        """Arma las tasas de conversión a pesos de cada moneda.
+
+        Las monedas distintas del dólar salen de la API de cotizaciones; el
+        dólar usa el valor de venta del tipo elegido. Si la API no responde,
+        solo quedan disponibles ARS y USD.
+
+        Args:
+            cotizacion_usd (CotizacionDolar): Cotización que fija el USD.
+
+        Returns:
+            Dict[str, float]: Pesos por unidad de cada moneda.
+        """
+        tasas: Dict[str, float] = {}
+        try:
+            tasas.update(self._svc_cotizacion.obtener_cotizaciones_monedas())
+        except ErrorServicio as error:
+            print(f"\n  Aviso: no se pudieron obtener las demás monedas "
+                  f"({error}). Solo se convierte con USD.")
+        tasas["USD"] = cotizacion_usd.valor_venta
+        return tasas
 
     def _lista_precios_bimonetaria(self) -> None:
         """Muestra los precios del catálogo en pesos y en otra moneda."""
         print("\n  --- Lista de Precios Bimonetaria ---")
+        monedas = self._svc_moneda.listar()
         print("  Monedas disponibles:")
-        for m in self._svc_moneda.listar():
+        for m in monedas:
             print(f"    {m.codigo} – {m.nombre}")
 
+        codigos = {m.codigo for m in monedas}
         codigo = pedir_texto(
             "  Código de la moneda a la que convertir: "
         ).upper()
+        if codigo not in codigos:
+            raise EntidadNoEncontradaError(
+                f"No existe la moneda con código {codigo}"
+            )
 
-        cotizacion = self._cotizacion_oficial()
-        print(f"\n  Cotización utilizada: {cotizacion.tipo.nombre}, "
+        cotizacion = self._elegir_cotizacion_usd()
+        print(f"\n  Cotización del USD: {cotizacion.tipo.nombre}, "
               f"valor de venta {cotizacion.valor_venta:.2f} "
               f"({cotizacion.fecha})")
+        tasas = self._obtener_tasas(cotizacion)
 
-        if codigo not in ("ARS", "USD"):
-            print(f"  Aviso: no hay cotización real para {codigo}, los valores"
-                  " se muestran como no disponibles en lugar de inventarlos.")
+        if codigo not in tasas and codigo != MONEDA_BASE:
+            print(f"  Aviso: no hay cotización para {codigo}; se muestran "
+                  "como N/D los libros sin precio cargado en esa moneda.")
 
-        print(f"\n  {'ISBN':<20} {'Título':<28} {'Origen':>16}"
-              f" | {'Convertido':>18}")
+        print(f"\n  {'ID':>3} {'Libro':<30} {MONEDA_BASE:>14} "
+              f"{codigo:>14}")
         for fila in self._svc_libro.listar_precios_bimonetarios(
-            cotizacion, codigo
+            codigo, tasas
         ):
-            if fila.valor_destino is None:
-                convertido = f"{fila.moneda_destino}: no disponible"
-            else:
-                convertido = (
-                    f"{fila.valor_destino:>10.2f} {fila.moneda_destino}"
-                )
-            print(f"  {fila.libro.isbn:<20} {fila.libro.titulo[:28]:<28}"
-                  f" {fila.valor_origen:>10.2f} {fila.moneda_origen:<4}"
-                  f" | {convertido:>18}")
+            ars = ("N/D" if fila.valor_ars is None
+                   else f"{fila.valor_ars:,.2f}")
+            destino = ("N/D" if fila.valor_destino is None
+                       else f"{fila.valor_destino:,.2f}")
+            print(f"  {fila.libro.id_libro:>3} {fila.libro.titulo[:30]:<30}"
+                  f" {ars:>14} {destino:>14}")
 
     def _exportar_precios_csv(self) -> None:
         """Exporta los precios de todos los libros en todas las monedas."""
         print("\n  --- Exportar Precios a CSV ---")
 
         codigos = [m.codigo for m in self._svc_moneda.listar()]
-        cotizacion = self._cotizacion_oficial()
+        cotizacion = self._elegir_cotizacion_usd()
+        tasas = self._obtener_tasas(cotizacion)
         filas = self._svc_libro.listar_precios_multimonetarios(
-            cotizacion, codigos
+            codigos, tasas
         )
 
-        os.makedirs(CARPETA_EXPORTACION_POR_DEFECTO, exist_ok=True)
+        os.makedirs(CARPETA_REPORTES, exist_ok=True)
         nombre = f"precios_{datetime.datetime.now():%Y%m%d_%H%M%S}.csv"
-        ruta = os.path.join(CARPETA_EXPORTACION_POR_DEFECTO, nombre)
+        ruta = os.path.join(CARPETA_REPORTES, nombre)
 
         with open(ruta, mode="w", newline="", encoding="utf-8") as archivo:
             escritor = csv.writer(archivo)
-            escritor.writerow(
-                ["isbn", "titulo", "moneda_origen", "valor_origen", *codigos]
-            )
+            escritor.writerow(["libro_id", "isbn", "titulo", *codigos])
             for libro, valores in filas:
                 escritor.writerow([
+                    libro.id_libro,
                     libro.isbn,
                     libro.titulo,
-                    libro.precio.moneda.codigo,
-                    f"{libro.precio.valor:.2f}",
                     *[
                         "" if valores[codigo] is None
                         else f"{valores[codigo]:.2f}"
@@ -1099,8 +1267,8 @@ class Consola:
                     ],
                 ])
 
-        print(f"\n  Archivo generado: {ruta}")
+        print(f"\n  Archivo generado: {os.path.abspath(ruta)}")
         print(f"  {len(filas)} libros exportados en {len(codigos)} monedas.")
-        print(f"  Cotización usada: {cotizacion.tipo.nombre} "
-              f"(valor de venta {cotizacion.valor_venta:.2f}).")
-        print("  Las monedas sin cotización real se exportan vacías.")
+        print(f"  USD valuado con {cotizacion.tipo.nombre} "
+              f"(venta {cotizacion.valor_venta:.2f}).")
+        print("  Las monedas sin cotización se exportan vacías.")

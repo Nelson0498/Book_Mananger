@@ -1,27 +1,19 @@
-"""
-Repositorios responsables de la persistencia de las entidades del sistema.
+"""Repositorios responsables de la persistencia de las entidades del sistema.
 
-El módulo contiene dos familias de repositorios que implementan las mismas
-interfaces, de modo que los servicios no dependan del mecanismo de persistencia:
+Los repositorios persisten en una base de datos relacional mediante los
+modelos ORM declarados en `models/models.py`. La conversión entre modelos ORM
+y entidades de dominio se realiza únicamente en este módulo: las entidades
+conservan su encapsulamiento y no conocen la base de datos.
 
-- **Archivos CSV** (Sprint 1): `RepositorioCSV` como clase base genérica para
-  las entidades con id numérico simple, y repositorios específicos para Libro,
-  Stock y CotizacionDolar, cuyas claves de identidad no son un id entero.
-  Los CSV de `migrations/csv` se conservan como fuente de la migración.
-
-- **Base de datos relacional** (Sprint 2): `RepositorioSQLAlchemy` y sus
-  repositorios derivados, que persisten mediante los modelos ORM declarados en
-  `models/models.py`. La conversión entre modelos ORM y entidades de dominio se
-  realiza únicamente en este módulo: las entidades conservan su encapsulamiento
-  y no conocen la base de datos.
+Las lecturas usan `ConexionDB.obtener_sesion()` y las escrituras
+`ConexionDB.transaccion()`, de modo que cada operación de escritura se
+confirma o se revierte completa.
 """
 
 import abc
-import csv
 import datetime
-import os
 from decimal import Decimal
-from typing import ClassVar, Dict, Generic, List, Optional, TypeVar
+from typing import ClassVar, Generic, List, Optional, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -64,6 +56,12 @@ class IRepositorio(abc.ABC, Generic[T]):
     def crear(self, entidad: T) -> T:
         """Crea una nueva entidad en el repositorio.
 
+        Args:
+            entidad (T): Entidad a persistir.
+
+        Returns:
+            T: La entidad persistida.
+
         Raises:
             ValueError: Si ya existe una entidad con el mismo id.
         """
@@ -89,64 +87,28 @@ class IRepositorio(abc.ABC, Generic[T]):
         """Elimina la entidad con el id dado. Devuelve True si existía."""
 
 
-class IRepositorioLibro(abc.ABC):
-    """Interfaz para el repositorio de Libro, identificado por ISBN."""
-
-    @abc.abstractmethod
-    def crear(self, libro: Libro) -> Libro:
-        """Crea un nuevo libro.
-
-        Raises:
-            ValueError: Si ya existe un libro con el mismo ISBN.
-        """
+class IRepositorioLibro(IRepositorio[Libro]):
+    """Interfaz para el repositorio de Libro, identificado por id."""
 
     @abc.abstractmethod
     def leer_por_isbn(self, isbn: str) -> Optional[Libro]:
         """Devuelve el libro con el ISBN dado, o None si no existe."""
 
-    @abc.abstractmethod
-    def leer_todos(self) -> List[Libro]:
-        """Devuelve todos los libros del catálogo."""
-
-    @abc.abstractmethod
-    def actualizar(self, libro: Libro) -> Libro:
-        """Actualiza un libro existente.
-
-        Raises:
-            ValueError: Si no se encuentra el libro para actualizar.
-        """
-
-    @abc.abstractmethod
-    def eliminar(self, isbn: str) -> bool:
-        """Elimina el libro con el ISBN dado. Devuelve True si existía."""
-
 
 class IRepositorioStock(abc.ABC):
-    """Interfaz para el repositorio de Stock, asociado a un libro por ISBN.
-
-    Decisión de diseño: en este modelo el identificador del libro es el ISBN
-    (es la clave de la tabla `libros`, la clave de los CSV de origen y la del
-    repositorio de libros), por lo que el stock se busca y se elimina por ISBN
-    en lugar de por un id entero.
-
-    La interfaz provista por la cátedra en el TP1 declaraba
-    `leer_por_libro(libro_id: int)` y `eliminar(libro_id: int)`. La diferencia
-    entre ambas firmas quedó registrada como observación en la devolución de
-    ese trabajo y no fue resuelta oficialmente; se mantiene el ISBN para no
-    introducir un identificador nuevo en `Libro` ni migrar los datos del TP1.
-    """
+    """Interfaz para el repositorio de Stock, asociado a un libro por id."""
 
     @abc.abstractmethod
     def crear(self, stock: Stock) -> Stock:
-        """Crea un nuevo registro de stock (stock.libro_isbn debe estar seteado).
+        """Crea un nuevo registro de stock (stock.libro debe estar seteado).
 
         Raises:
-            ValueError: Si ya existe stock para ese libro.
+            ValueError: Si el stock no tiene libro o ya existe stock para él.
         """
 
     @abc.abstractmethod
-    def leer_por_libro(self, libro_isbn: str) -> Optional[Stock]:
-        """Devuelve el stock asociado al ISBN de libro dado, o None."""
+    def leer_por_libro(self, libro_id: int) -> Optional[Stock]:
+        """Devuelve el stock asociado al id de libro dado, o None."""
 
     @abc.abstractmethod
     def actualizar(self, stock: Stock) -> Stock:
@@ -157,8 +119,8 @@ class IRepositorioStock(abc.ABC):
         """
 
     @abc.abstractmethod
-    def eliminar(self, libro_isbn: str) -> bool:
-        """Elimina el stock asociado al ISBN dado. Devuelve True si existía."""
+    def eliminar(self, libro_id: int) -> bool:
+        """Elimina el stock asociado al id dado. Devuelve True si existía."""
 
 
 class IRepositorioCotizacionDolar(abc.ABC):
@@ -169,7 +131,7 @@ class IRepositorioCotizacionDolar(abc.ABC):
         """Crea una nueva cotización.
 
         Raises:
-            ValueError: Si ya existe una cotización para el mismo tipo y fecha.
+            ValueError: Si ya existe una cotización del mismo tipo y fecha.
         """
 
     @abc.abstractmethod
@@ -189,566 +151,6 @@ class IRepositorioCotizacionDolar(abc.ABC):
     @abc.abstractmethod
     def eliminar(self, tipo_id: int, fecha: datetime.date) -> bool:
         """Elimina la cotización de un tipo y fecha dados."""
-
-
-# ---------------------------------------------------------------------------
-# Utilidad interna de acceso a CSV
-# ---------------------------------------------------------------------------
-
-class _AlmacenCSV:
-    """Utilidad interna para leer y escribir filas de un archivo CSV.
-
-    No forma parte del contrato público de los repositorios; solo evita
-    duplicar la lógica de acceso a disco entre las distintas clases.
-    """
-
-    def __init__(self, ruta_csv: str, encabezados: List[str]) -> None:
-        # Raíz del repositorio: repositories/ -> book_manager/ -> src/ -> raíz.
-        raiz_proyecto = os.path.abspath(
-            os.path.join(os.path.dirname(os.path.abspath(__file__)),
-                         "..", "..", "..")
-        )
-
-        if os.path.isabs(ruta_csv):
-            self._ruta_csv = ruta_csv
-        else:
-            self._ruta_csv = os.path.normpath(
-                os.path.join(raiz_proyecto, ruta_csv)
-            )
-
-        self._encabezados = encabezados
-        self._asegurar_archivo()
-
-    def _asegurar_archivo(self) -> None:
-        directorio = os.path.dirname(self._ruta_csv)
-        if directorio:
-            os.makedirs(directorio, exist_ok=True)
-        if not os.path.exists(self._ruta_csv):
-            self._escribir_filas([])
-
-    def _leer_filas(self) -> List[Dict[str, str]]:
-        # `utf-8-sig` acepta archivos con y sin BOM, de modo que un CSV guardado
-        # desde otra herramienta no rompa el nombre de la primera columna. La
-        # escritura se mantiene en UTF-8 sin BOM.
-        with open(self._ruta_csv, mode="r", newline="",
-                  encoding="utf-8-sig") as archivo:
-            return list(csv.DictReader(archivo))
-
-    def _escribir_filas(self, filas: List[Dict[str, str]]) -> None:
-        with open(self._ruta_csv, mode="w", newline="",
-                  encoding="utf-8") as archivo:
-            escritor = csv.DictWriter(
-                archivo, fieldnames=self._encabezados
-            )
-            escritor.writeheader()
-            escritor.writerows(filas)
-
-
-# ---------------------------------------------------------------------------
-# Repositorio genérico para entidades con id numérico simple
-# ---------------------------------------------------------------------------
-
-class RepositorioCSV(_AlmacenCSV, IRepositorio[T], abc.ABC):
-    """Repositorio base que persiste entidades de tipo T en un archivo CSV."""
-
-    @abc.abstractmethod
-    def _to_row(self, entidad: T) -> Dict[str, str]:
-        """Convierte una entidad en una fila (dict) lista para el CSV."""
-
-    @abc.abstractmethod
-    def _from_row(self, fila: Dict[str, str]) -> T:
-        """Reconstruye una entidad a partir de una fila del CSV."""
-
-    def crear(self, entidad: T) -> T:
-        if self.leer_por_id(entidad.id) is not None:
-            raise ValueError(f"Ya existe una entidad con id {entidad.id}")
-        filas = self._leer_filas()
-        filas.append(self._to_row(entidad))
-        self._escribir_filas(filas)
-        return entidad
-
-    def leer_por_id(self, id: int) -> Optional[T]:
-        for fila in self._leer_filas():
-            if int(fila["id"]) == id:
-                return self._from_row(fila)
-        return None
-
-    def leer_todos(self) -> List[T]:
-        return [self._from_row(fila) for fila in self._leer_filas()]
-
-    def actualizar(self, entidad: T) -> T:
-        filas = self._leer_filas()
-        for indice, fila in enumerate(filas):
-            if int(fila["id"]) == entidad.id:
-                filas[indice] = self._to_row(entidad)
-                self._escribir_filas(filas)
-                return entidad
-        raise ValueError(
-            f"No se encontró la entidad con id {entidad.id} para actualizar"
-        )
-
-    def eliminar(self, id: int) -> bool:
-        filas = self._leer_filas()
-        restantes = [fila for fila in filas if int(fila["id"]) != id]
-        if len(restantes) == len(filas):
-            return False
-        self._escribir_filas(restantes)
-        return True
-
-
-# ---------------------------------------------------------------------------
-# Repositorios concretos para entidades simples
-# ---------------------------------------------------------------------------
-
-class RepositorioGenero(RepositorioCSV[Genero]):
-    """Repositorio CRUD de Genero."""
-
-    def __init__(
-        self,
-        ruta_csv: str = "src/book_manager/migrations/csv/generos.csv",
-    ) -> None:
-        super().__init__(ruta_csv, encabezados=["id", "nombre"])
-
-    def _to_row(self, entidad: Genero) -> Dict[str, str]:
-        return {"id": str(entidad.id_genero), "nombre": entidad.nombre}
-
-    def _from_row(self, fila: Dict[str, str]) -> Genero:
-        return Genero(id_genero=int(fila["id"]), nombre=fila["nombre"])
-
-
-class RepositorioEditorial(RepositorioCSV[Editorial]):
-    """Repositorio CRUD de Editorial."""
-
-    def __init__(
-        self,
-        ruta_csv: str = "src/book_manager/migrations/csv/editoriales.csv",
-    ) -> None:
-        super().__init__(ruta_csv, encabezados=["id", "nombre", "pais"])
-
-    def _to_row(self, entidad: Editorial) -> Dict[str, str]:
-        return {
-            "id": str(entidad.id_editorial),
-            "nombre": entidad.nombre,
-            "pais": entidad.pais or "",
-        }
-
-    def _from_row(self, fila: Dict[str, str]) -> Editorial:
-        return Editorial(
-            id_editorial=int(fila["id"]),
-            nombre=fila["nombre"],
-            pais=fila["pais"] or None,
-        )
-
-
-class RepositorioMoneda(RepositorioCSV[Moneda]):
-    """Repositorio CRUD de Moneda."""
-
-    def __init__(
-        self,
-        ruta_csv: str = "src/book_manager/migrations/csv/monedas.csv",
-    ) -> None:
-        super().__init__(
-            ruta_csv, encabezados=["id", "codigo", "nombre", "simbolo"]
-        )
-
-    def _to_row(self, entidad: Moneda) -> Dict[str, str]:
-        return {
-            "id": str(entidad.id_moneda),
-            "codigo": entidad.codigo,
-            "nombre": entidad.nombre,
-            "simbolo": entidad.simbolo,
-        }
-
-    def _from_row(self, fila: Dict[str, str]) -> Moneda:
-        return Moneda(
-            id_moneda=int(fila["id"]),
-            codigo=fila["codigo"],
-            nombre=fila["nombre"],
-            simbolo=fila["simbolo"],
-        )
-
-
-class RepositorioTipoCotizacion(RepositorioCSV[TipoCotizacion]):
-    """Repositorio CRUD de TipoCotizacion."""
-
-    def __init__(
-        self,
-        ruta_csv: str = "src/book_manager/migrations/csv/tipos_cotizacion.csv",
-    ) -> None:
-        super().__init__(ruta_csv, encabezados=["id", "nombre"])
-
-    def _to_row(self, entidad: TipoCotizacion) -> Dict[str, str]:
-        return {"id": str(entidad.id_tipo), "nombre": entidad.nombre}
-
-    def _from_row(self, fila: Dict[str, str]) -> TipoCotizacion:
-        return TipoCotizacion(
-            id_tipo=int(fila["id"]), nombre=fila["nombre"]
-        )
-
-
-# ---------------------------------------------------------------------------
-# Repositorio de Precio (entidad independiente con CRUD propio)
-# ---------------------------------------------------------------------------
-
-class RepositorioPrecio(RepositorioCSV[Precio]):
-    """Repositorio CRUD de Precio.
-
-    Persiste id_precio, valor y moneda_id.  Para reconstruir el objeto
-    Precio completo delega en el repositorio de Moneda.
-    """
-
-    def __init__(
-        self,
-        repositorio_moneda: RepositorioMoneda,
-        ruta_csv: str = "src/book_manager/migrations/csv/precios.csv",
-    ) -> None:
-        super().__init__(
-            ruta_csv, encabezados=["id", "valor", "moneda_id"]
-        )
-        self._repositorio_moneda = repositorio_moneda
-
-    def _to_row(self, entidad: Precio) -> Dict[str, str]:
-        return {
-            "id": str(entidad.id_precio),
-            "valor": str(entidad.valor),
-            "moneda_id": str(entidad.moneda.id_moneda),
-        }
-
-    def _from_row(self, fila: Dict[str, str]) -> Precio:
-        moneda = self._repositorio_moneda.leer_por_id(int(fila["moneda_id"]))
-        if moneda is None:
-            raise ValueError(
-                f"Moneda inexistente con id {fila['moneda_id']} "
-                f"referenciada por el precio {fila['id']}"
-            )
-        return Precio(
-            id_precio=int(fila["id"]),
-            valor=float(fila["valor"]),
-            moneda=moneda,
-        )
-
-
-# ---------------------------------------------------------------------------
-# Repositorio de Libro (clave: ISBN, con referencias a otros repositorios)
-# ---------------------------------------------------------------------------
-
-class RepositorioLibro(_AlmacenCSV, IRepositorioLibro):
-    """Repositorio CRUD de Libro.
-
-    Persiste únicamente los ids de género, editorial y precio; para
-    reconstruir el objeto completo delega en los repositorios de esas
-    entidades y en el repositorio de Stock (relación 1 a 1 por ISBN).
-    """
-
-    def __init__(
-        self,
-        repositorio_genero: RepositorioGenero,
-        repositorio_editorial: RepositorioEditorial,
-        repositorio_precio: RepositorioPrecio,
-        repositorio_stock: "RepositorioStock",
-        ruta_csv: str = "src/book_manager/migrations/csv/libros.csv",
-    ) -> None:
-        super().__init__(
-            ruta_csv,
-            encabezados=[
-                "isbn", "titulo", "autor",
-                "editorial_id", "genero_id", "precio_id",
-            ],
-        )
-        self._repositorio_genero = repositorio_genero
-        self._repositorio_editorial = repositorio_editorial
-        self._repositorio_precio = repositorio_precio
-        self._repositorio_stock = repositorio_stock
-
-    def _to_row(self, libro: Libro) -> Dict[str, str]:
-        return {
-            "isbn": libro.isbn,
-            "titulo": libro.titulo,
-            "autor": libro.autor,
-            "editorial_id": str(libro.editorial.id_editorial),
-            "genero_id": str(libro.genero.id_genero),
-            "precio_id": str(libro.precio.id_precio),
-        }
-
-    def _from_row(self, fila: Dict[str, str]) -> Libro:
-        genero = self._repositorio_genero.leer_por_id(
-            int(fila["genero_id"])
-        )
-        editorial = self._repositorio_editorial.leer_por_id(
-            int(fila["editorial_id"])
-        )
-        precio = self._repositorio_precio.leer_por_id(
-            int(fila["precio_id"])
-        )
-
-        if genero is None:
-            raise ValueError(
-                f"Género inexistente (id={fila['genero_id']}) "
-                f"para el libro {fila['isbn']}"
-            )
-        if editorial is None:
-            raise ValueError(
-                f"Editorial inexistente (id={fila['editorial_id']}) "
-                f"para el libro {fila['isbn']}"
-            )
-        if precio is None:
-            raise ValueError(
-                f"Precio inexistente (id={fila['precio_id']}) "
-                f"para el libro {fila['isbn']}"
-            )
-
-        stock = self._repositorio_stock.leer_por_libro(fila["isbn"])
-        if stock is None:
-            stock = Stock(
-                id_stock=0, cantidad=0, libro_isbn=fila["isbn"]
-            )
-
-        return Libro(
-            isbn=fila["isbn"],
-            titulo=fila["titulo"],
-            autor=fila["autor"],
-            editorial=editorial,
-            genero=genero,
-            precio=precio,
-            stock=stock,
-        )
-
-    def crear(self, libro: Libro) -> Libro:
-        if self.leer_por_isbn(libro.isbn) is not None:
-            raise ValueError(
-                f"Ya existe un libro con ISBN {libro.isbn}"
-            )
-        filas = self._leer_filas()
-        filas.append(self._to_row(libro))
-        self._escribir_filas(filas)
-        return libro
-
-    def leer_por_isbn(self, isbn: str) -> Optional[Libro]:
-        for fila in self._leer_filas():
-            if fila["isbn"] == isbn:
-                return self._from_row(fila)
-        return None
-
-    def leer_todos(self) -> List[Libro]:
-        return [self._from_row(fila) for fila in self._leer_filas()]
-
-    def actualizar(self, libro: Libro) -> Libro:
-        filas = self._leer_filas()
-        for indice, fila in enumerate(filas):
-            if fila["isbn"] == libro.isbn:
-                filas[indice] = self._to_row(libro)
-                self._escribir_filas(filas)
-                return libro
-        raise ValueError(
-            f"No se encontró el libro con ISBN {libro.isbn} para actualizar"
-        )
-
-    def eliminar(self, isbn: str) -> bool:
-        filas = self._leer_filas()
-        restantes = [fila for fila in filas if fila["isbn"] != isbn]
-        if len(restantes) == len(filas):
-            return False
-        self._escribir_filas(restantes)
-        return True
-
-
-# ---------------------------------------------------------------------------
-# Repositorio de Stock (clave: ISBN del libro asociado)
-# ---------------------------------------------------------------------------
-
-class RepositorioStock(_AlmacenCSV, IRepositorioStock):
-    """Repositorio CRUD de Stock, asociado 1 a 1 con un libro por ISBN."""
-
-    def __init__(
-        self,
-        ruta_csv: str = "src/book_manager/migrations/csv/stock.csv",
-    ) -> None:
-        super().__init__(
-            ruta_csv,
-            encabezados=[
-                "libro_isbn", "id_stock", "cantidad", "cantidad_minima",
-            ],
-        )
-
-    def _to_row(self, stock: Stock) -> Dict[str, str]:
-        if not stock.libro_isbn:
-            raise ValueError(
-                "El stock debe tener asignado el ISBN del libro asociado"
-            )
-        return {
-            "libro_isbn": stock.libro_isbn,
-            "id_stock": str(stock.id_stock),
-            "cantidad": str(stock.cantidad),
-            "cantidad_minima": str(stock.cantidad_minima),
-        }
-
-    def _from_row(self, fila: Dict[str, str]) -> Stock:
-        return Stock(
-            id_stock=int(fila["id_stock"]),
-            cantidad=int(fila["cantidad"]),
-            cantidad_minima=int(fila["cantidad_minima"]),
-            libro_isbn=fila["libro_isbn"],
-        )
-
-    def crear(self, stock: Stock) -> Stock:
-        if self.leer_por_libro(stock.libro_isbn) is not None:
-            raise ValueError(
-                f"Ya existe stock para el libro {stock.libro_isbn}"
-            )
-        filas = self._leer_filas()
-        filas.append(self._to_row(stock))
-        self._escribir_filas(filas)
-        return stock
-
-    def leer_por_libro(self, libro_isbn: str) -> Optional[Stock]:
-        for fila in self._leer_filas():
-            if fila["libro_isbn"] == libro_isbn:
-                return self._from_row(fila)
-        return None
-
-    def leer_todos(self) -> List[Stock]:
-        """Devuelve todos los registros de stock."""
-        return [self._from_row(fila) for fila in self._leer_filas()]
-
-    def actualizar(self, stock: Stock) -> Stock:
-        filas = self._leer_filas()
-        for indice, fila in enumerate(filas):
-            if fila["libro_isbn"] == stock.libro_isbn:
-                filas[indice] = self._to_row(stock)
-                self._escribir_filas(filas)
-                return stock
-        raise ValueError(
-            f"No se encontró stock para el libro {stock.libro_isbn}"
-        )
-
-    def eliminar(self, libro_isbn: str) -> bool:
-        filas = self._leer_filas()
-        restantes = [
-            fila for fila in filas
-            if fila["libro_isbn"] != libro_isbn
-        ]
-        if len(restantes) == len(filas):
-            return False
-        self._escribir_filas(restantes)
-        return True
-
-
-# ---------------------------------------------------------------------------
-# Repositorio de CotizacionDolar (clave compuesta: tipo + fecha)
-# ---------------------------------------------------------------------------
-
-class RepositorioCotizacionDolar(_AlmacenCSV, IRepositorioCotizacionDolar):
-    """Repositorio CRUD de CotizacionDolar, con clave compuesta (tipo, fecha)."""
-
-    def __init__(
-        self,
-        repositorio_tipo_cotizacion: RepositorioTipoCotizacion,
-        ruta_csv: str = "src/book_manager/migrations/csv/cotizaciones.csv",
-    ) -> None:
-        super().__init__(
-            ruta_csv,
-            encabezados=[
-                "id_cotizacion", "tipo_id",
-                "valor_compra", "valor_venta", "fecha",
-            ],
-        )
-        self._repositorio_tipo_cotizacion = repositorio_tipo_cotizacion
-
-    def _to_row(self, cotizacion: CotizacionDolar) -> Dict[str, str]:
-        return {
-            "id_cotizacion": str(cotizacion.id_cotizacion),
-            "tipo_id": str(cotizacion.tipo.id_tipo),
-            "valor_compra": str(cotizacion.valor_compra),
-            "valor_venta": str(cotizacion.valor_venta),
-            "fecha": cotizacion.fecha.isoformat(),
-        }
-
-    def _from_row(self, fila: Dict[str, str]) -> CotizacionDolar:
-        tipo = self._repositorio_tipo_cotizacion.leer_por_id(
-            int(fila["tipo_id"])
-        )
-        if tipo is None:
-            raise ValueError(
-                f"Tipo de cotización inexistente: {fila['tipo_id']}"
-            )
-        return CotizacionDolar(
-            id_cotizacion=int(fila["id_cotizacion"]),
-            tipo=tipo,
-            valor_compra=float(fila["valor_compra"]),
-            valor_venta=float(fila["valor_venta"]),
-            fecha=datetime.date.fromisoformat(fila["fecha"]),
-        )
-
-    def leer_todos(self) -> List[CotizacionDolar]:
-        """Devuelve todas las cotizaciones registradas."""
-        return [self._from_row(fila) for fila in self._leer_filas()]
-
-    def crear(self, cotizacion: CotizacionDolar) -> CotizacionDolar:
-        existente = self.leer_por_tipo_y_fecha(
-            cotizacion.tipo.id_tipo, cotizacion.fecha
-        )
-        if existente is not None:
-            raise ValueError(
-                f"Ya existe una cotización de tipo "
-                f"{cotizacion.tipo.id_tipo} "
-                f"para la fecha {cotizacion.fecha}"
-            )
-        filas = self._leer_filas()
-        filas.append(self._to_row(cotizacion))
-        self._escribir_filas(filas)
-        return cotizacion
-
-    def leer_por_tipo_y_fecha(
-        self, tipo_id: int, fecha: datetime.date
-    ) -> Optional[CotizacionDolar]:
-        for fila in self._leer_filas():
-            if (int(fila["tipo_id"]) == tipo_id
-                    and fila["fecha"] == fecha.isoformat()):
-                return self._from_row(fila)
-        return None
-
-    def leer_historico_por_tipo(
-        self, tipo_id: int
-    ) -> List[CotizacionDolar]:
-        return [
-            self._from_row(fila)
-            for fila in self._leer_filas()
-            if int(fila["tipo_id"]) == tipo_id
-        ]
-
-    def actualizar(
-        self, cotizacion: CotizacionDolar
-    ) -> CotizacionDolar:
-        filas = self._leer_filas()
-        for indice, fila in enumerate(filas):
-            if (int(fila["tipo_id"]) == cotizacion.tipo.id_tipo
-                    and fila["fecha"] == cotizacion.fecha.isoformat()):
-                filas[indice] = self._to_row(cotizacion)
-                self._escribir_filas(filas)
-                return cotizacion
-        raise ValueError("No se encontró la cotización a actualizar")
-
-    def eliminar(self, tipo_id: int, fecha: datetime.date) -> bool:
-        filas = self._leer_filas()
-        restantes = [
-            fila for fila in filas
-            if not (int(fila["tipo_id"]) == tipo_id
-                    and fila["fecha"] == fecha.isoformat())
-        ]
-        if len(restantes) == len(filas):
-            return False
-        self._escribir_filas(restantes)
-        return True
-
-
-# ===========================================================================
-# Sprint 2: repositorios sobre base de datos relacional (SQLAlchemy)
-# ===========================================================================
-#
-# Implementan las mismas interfaces que los repositorios CSV, por lo que los
-# servicios y la consola siguen funcionando sin modificaciones. Las lecturas
-# usan `ConexionDB.obtener_sesion()` y las escrituras `ConexionDB.transaccion()`,
-# de modo que cada operación de escritura se confirma o se revierte completa.
 
 
 # ---------------------------------------------------------------------------
@@ -784,27 +186,73 @@ def _tipo_cotizacion_desde_modelo(
     return TipoCotizacion(id_tipo=modelo.id, nombre=modelo.nombre)
 
 
-def _precio_desde_modelo(modelo: PrecioModel) -> Precio:
+def _libro_basico_desde_modelo(modelo: LibroModel) -> Libro:
+    """Convierte un libro ORM en una entidad sin precios ni stock.
+
+    Se usa para colgar la referencia al libro en un `Precio` o un `Stock`
+    leídos por separado, sin recorrer de nuevo todo el grafo de relaciones.
+    """
+    return Libro(
+        id_libro=modelo.id,
+        isbn=modelo.isbn,
+        titulo=modelo.titulo,
+        autor=modelo.autor,
+        editorial=_editorial_desde_modelo(modelo.editorial),
+        genero=_genero_desde_modelo(modelo.genero),
+    )
+
+
+def _precio_desde_modelo(
+    modelo: PrecioModel, libro: Optional[Libro] = None
+) -> Precio:
     """Convierte un modelo ORM de precio en su entidad de dominio.
 
-    La base de datos devuelve `Decimal` y la entidad de dominio espera `float`,
-    por lo que la conversión se hace de forma explícita.
+    La base de datos devuelve `Decimal` y la entidad de dominio espera
+    `float`, por lo que la conversión se hace de forma explícita.
+
+    Args:
+        modelo (PrecioModel): Modelo a convertir.
+        libro (Optional[Libro]): Libro al que se asocia el precio. Si es
+            None, se arma un libro básico a partir de la relación ORM.
+
+    Returns:
+        Precio: Entidad con su referencia al libro asignada.
     """
-    return Precio(
+    precio = Precio(
         id_precio=modelo.id,
         valor=float(modelo.valor),
         moneda=_moneda_desde_modelo(modelo.moneda),
     )
+    precio.libro = (
+        libro if libro is not None
+        else _libro_basico_desde_modelo(modelo.libro)
+    )
+    return precio
 
 
-def _stock_desde_modelo(modelo: StockModel) -> Stock:
-    """Convierte un modelo ORM de stock en su entidad de dominio."""
-    return Stock(
+def _stock_desde_modelo(
+    modelo: StockModel, libro: Optional[Libro] = None
+) -> Stock:
+    """Convierte un modelo ORM de stock en su entidad de dominio.
+
+    Args:
+        modelo (StockModel): Modelo a convertir.
+        libro (Optional[Libro]): Libro al que se asocia el stock. Si es
+            None, se arma un libro básico a partir de la relación ORM.
+
+    Returns:
+        Stock: Entidad con su referencia al libro asignada.
+    """
+    stock = Stock(
         id_stock=modelo.id_stock,
         cantidad=modelo.cantidad,
         cantidad_minima=modelo.cantidad_minima,
-        libro_isbn=modelo.libro_isbn,
     )
+    stock.libro = (
+        libro if libro is not None
+        else _libro_basico_desde_modelo(modelo.libro)
+    )
+    return stock
 
 
 def _cotizacion_desde_modelo(
@@ -821,25 +269,20 @@ def _cotizacion_desde_modelo(
 
 
 def _libro_desde_modelo(modelo: LibroModel) -> Libro:
-    """Convierte un modelo ORM de libro en su entidad de dominio.
+    """Convierte un modelo ORM de libro en su entidad de dominio completa.
 
-    Si el libro todavía no tiene stock asociado se usa el mismo criterio que en
-    el repositorio CSV: un stock vacío en lugar de un error.
+    El libro se arma con todos sus precios y su stock, y cada uno recibe la
+    referencia al libro (relación bidireccional).
     """
-    if modelo.stock is not None:
-        stock = _stock_desde_modelo(modelo.stock)
-    else:
-        stock = Stock(id_stock=0, cantidad=0, libro_isbn=modelo.isbn)
+    libro = _libro_basico_desde_modelo(modelo)
 
-    return Libro(
-        isbn=modelo.isbn,
-        titulo=modelo.titulo,
-        autor=modelo.autor,
-        editorial=_editorial_desde_modelo(modelo.editorial),
-        genero=_genero_desde_modelo(modelo.genero),
-        precio=_precio_desde_modelo(modelo.precio),
-        stock=stock,
-    )
+    for modelo_precio in sorted(modelo.precios, key=lambda p: p.id):
+        libro.agregar_precio(_precio_desde_modelo(modelo_precio, libro))
+
+    if modelo.stock is not None:
+        libro.stock = _stock_desde_modelo(modelo.stock, libro)
+
+    return libro
 
 
 # ---------------------------------------------------------------------------
@@ -857,6 +300,11 @@ class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
     modelo: ClassVar[type[Base]]
 
     def __init__(self, conexion: ConexionDB) -> None:
+        """Crea el repositorio.
+
+        Args:
+            conexion (ConexionDB): Conexión a la base de datos.
+        """
         self._conexion = conexion
 
     @abc.abstractmethod
@@ -880,15 +328,28 @@ class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
         return sesion.get(self.modelo, id_entidad)
 
     def crear(self, entidad: T) -> T:
+        """Crea una nueva entidad en la base de datos.
+
+        Args:
+            entidad (T): Entidad a persistir.
+
+        Returns:
+            T: La entidad persistida.
+
+        Raises:
+            ValueError: Si ya existe una entidad con el mismo id.
+        """
         with self._conexion.transaccion() as sesion:
             if self._buscar(sesion, entidad.id) is not None:
                 raise ValueError(f"Ya existe una entidad con id {entidad.id}")
             modelo = self._to_modelo(entidad)
             sesion.add(modelo)
             sesion.flush()
+            sesion.expire(modelo)
             return self._to_entidad(modelo)
 
     def leer_por_id(self, id: int) -> Optional[T]:
+        """Devuelve la entidad con el id dado, o None si no existe."""
         with self._conexion.obtener_sesion() as sesion:
             modelo = self._buscar(sesion, id)
             if modelo is None:
@@ -896,6 +357,7 @@ class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
             return self._to_entidad(modelo)
 
     def leer_todos(self) -> List[T]:
+        """Devuelve todas las entidades, ordenadas por clave primaria."""
         with self._conexion.obtener_sesion() as sesion:
             columna_pk = self.modelo.__mapper__.primary_key[0]
             sentencia = (
@@ -907,6 +369,11 @@ class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
             return [self._to_entidad(modelo) for modelo in modelos]
 
     def actualizar(self, entidad: T) -> T:
+        """Actualiza una entidad existente.
+
+        Raises:
+            ValueError: Si no se encuentra la entidad para actualizar.
+        """
         with self._conexion.transaccion() as sesion:
             modelo = self._buscar(sesion, entidad.id)
             if modelo is None:
@@ -922,6 +389,7 @@ class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
             return self._to_entidad(modelo)
 
     def eliminar(self, id: int) -> bool:
+        """Elimina la entidad con el id dado. Devuelve True si existía."""
         with self._conexion.transaccion() as sesion:
             modelo = self._buscar(sesion, id)
             if modelo is None:
@@ -934,31 +402,36 @@ class RepositorioSQLAlchemy(IRepositorio[T], abc.ABC):
 # Repositorios concretos para entidades simples
 # ---------------------------------------------------------------------------
 
-class RepositorioGeneroSQLAlchemy(RepositorioSQLAlchemy[Genero]):
+class RepositorioGenero(RepositorioSQLAlchemy[Genero]):
     """Repositorio CRUD de Genero sobre la tabla `generos`."""
 
     modelo = GeneroModel
 
     def _to_entidad(self, modelo: GeneroModel) -> Genero:
+        """Convierte el modelo ORM en entidad."""
         return _genero_desde_modelo(modelo)
 
     def _to_modelo(self, entidad: Genero) -> GeneroModel:
+        """Convierte la entidad en un modelo ORM nuevo."""
         return GeneroModel(id=entidad.id_genero, nombre=entidad.nombre)
 
     def _actualizar_modelo(self, modelo: GeneroModel,
                            entidad: Genero) -> None:
+        """Copia los datos de la entidad sobre el modelo."""
         modelo.nombre = entidad.nombre
 
 
-class RepositorioEditorialSQLAlchemy(RepositorioSQLAlchemy[Editorial]):
+class RepositorioEditorial(RepositorioSQLAlchemy[Editorial]):
     """Repositorio CRUD de Editorial sobre la tabla `editoriales`."""
 
     modelo = EditorialModel
 
     def _to_entidad(self, modelo: EditorialModel) -> Editorial:
+        """Convierte el modelo ORM en entidad."""
         return _editorial_desde_modelo(modelo)
 
     def _to_modelo(self, entidad: Editorial) -> EditorialModel:
+        """Convierte la entidad en un modelo ORM nuevo."""
         return EditorialModel(
             id=entidad.id_editorial,
             nombre=entidad.nombre,
@@ -967,19 +440,22 @@ class RepositorioEditorialSQLAlchemy(RepositorioSQLAlchemy[Editorial]):
 
     def _actualizar_modelo(self, modelo: EditorialModel,
                            entidad: Editorial) -> None:
+        """Copia los datos de la entidad sobre el modelo."""
         modelo.nombre = entidad.nombre
         modelo.pais = entidad.pais
 
 
-class RepositorioMonedaSQLAlchemy(RepositorioSQLAlchemy[Moneda]):
+class RepositorioMoneda(RepositorioSQLAlchemy[Moneda]):
     """Repositorio CRUD de Moneda sobre la tabla `monedas`."""
 
     modelo = MonedaModel
 
     def _to_entidad(self, modelo: MonedaModel) -> Moneda:
+        """Convierte el modelo ORM en entidad."""
         return _moneda_desde_modelo(modelo)
 
     def _to_modelo(self, entidad: Moneda) -> MonedaModel:
+        """Convierte la entidad en un modelo ORM nuevo."""
         return MonedaModel(
             id=entidad.id_moneda,
             codigo=entidad.codigo,
@@ -989,245 +465,310 @@ class RepositorioMonedaSQLAlchemy(RepositorioSQLAlchemy[Moneda]):
 
     def _actualizar_modelo(self, modelo: MonedaModel,
                            entidad: Moneda) -> None:
+        """Copia los datos de la entidad sobre el modelo."""
         modelo.codigo = entidad.codigo
         modelo.nombre = entidad.nombre
         modelo.simbolo = entidad.simbolo
 
 
-class RepositorioTipoCotizacionSQLAlchemy(
-    RepositorioSQLAlchemy[TipoCotizacion]
-):
-    """Repositorio CRUD de TipoCotizacion sobre la tabla `tipos_cotizacion`."""
+class RepositorioTipoCotizacion(RepositorioSQLAlchemy[TipoCotizacion]):
+    """Repositorio CRUD de TipoCotizacion sobre `tipos_cotizacion`."""
 
     modelo = TipoCotizacionModel
 
     def _to_entidad(self, modelo: TipoCotizacionModel) -> TipoCotizacion:
+        """Convierte el modelo ORM en entidad."""
         return _tipo_cotizacion_desde_modelo(modelo)
 
     def _to_modelo(self, entidad: TipoCotizacion) -> TipoCotizacionModel:
+        """Convierte la entidad en un modelo ORM nuevo."""
         return TipoCotizacionModel(id=entidad.id_tipo, nombre=entidad.nombre)
 
     def _actualizar_modelo(self, modelo: TipoCotizacionModel,
                            entidad: TipoCotizacion) -> None:
+        """Copia los datos de la entidad sobre el modelo."""
         modelo.nombre = entidad.nombre
 
 
-class RepositorioPrecioSQLAlchemy(RepositorioSQLAlchemy[Precio]):
+# ---------------------------------------------------------------------------
+# Repositorio de Precio (relación N a 1 con Libro)
+# ---------------------------------------------------------------------------
+
+class RepositorioPrecio(RepositorioSQLAlchemy[Precio]):
     """Repositorio CRUD de Precio sobre la tabla `precios`.
 
-    La conversión a `Decimal` se hace a partir de la representación textual del
-    valor para evitar los errores de redondeo del punto flotante binario.
+    La conversión a `Decimal` se hace a partir de la representación textual
+    del valor para evitar los errores de redondeo del punto flotante binario.
+    Cada precio se persiste asociado al libro indicado en `precio.libro`.
     """
 
     modelo = PrecioModel
 
     def _opciones_carga(self) -> tuple:
-        return (selectinload(PrecioModel.moneda),)
+        """Carga anticipada de la moneda y del libro del precio."""
+        return (
+            selectinload(PrecioModel.moneda),
+            selectinload(PrecioModel.libro).selectinload(
+                LibroModel.editorial
+            ),
+            selectinload(PrecioModel.libro).selectinload(LibroModel.genero),
+        )
 
     def _to_entidad(self, modelo: PrecioModel) -> Precio:
+        """Convierte el modelo ORM en entidad."""
         return _precio_desde_modelo(modelo)
 
     def _to_modelo(self, entidad: Precio) -> PrecioModel:
+        """Convierte la entidad en un modelo ORM nuevo.
+
+        Raises:
+            ValueError: Si el precio no tiene un libro asignado.
+        """
+        if entidad.libro is None:
+            raise ValueError("El precio debe tener un libro asignado")
         return PrecioModel(
             id=entidad.id_precio,
-            valor=Decimal(str(entidad.valor)),
+            libro_id=entidad.libro.id,
             moneda_id=entidad.moneda.id_moneda,
+            valor=Decimal(str(entidad.valor)),
         )
 
     def _actualizar_modelo(self, modelo: PrecioModel,
                            entidad: Precio) -> None:
+        """Copia los datos de la entidad sobre el modelo."""
         modelo.valor = Decimal(str(entidad.valor))
         modelo.moneda_id = entidad.moneda.id_moneda
 
-    def eliminar(self, id: int) -> bool:
-        """Elimina un precio, siempre que ningún libro dependa de él.
+    def leer_por_libro(self, libro_id: int) -> List[Precio]:
+        """Devuelve los precios de un libro, uno por moneda.
 
-        Un precio referenciado por un libro no puede borrarse de forma
-        independiente: la clave foránea `libros.precio_id` no admite nulos. Se
-        informa con un error claro en lugar de dejar que la base falle, y el
-        precio se elimina junto con su libro desde `ServicioLibro.eliminar`.
+        Args:
+            libro_id (int): Identificador del libro.
 
-        Raises:
-            ValueError: Si el precio está asociado a un libro.
+        Returns:
+            List[Precio]: Precios del libro ordenados por id.
         """
-        with self._conexion.transaccion() as sesion:
-            modelo = self._buscar(sesion, id)
-            if modelo is None:
-                return False
-
-            libro = sesion.execute(
-                select(LibroModel).where(LibroModel.precio_id == id)
-            ).scalars().first()
-            if libro is not None:
-                raise ValueError(
-                    f"El precio {id} está asociado al libro {libro.isbn} "
-                    f"y no puede eliminarse por separado"
-                )
-
-            sesion.delete(modelo)
-            return True
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = (
+                select(PrecioModel)
+                .options(*self._opciones_carga())
+                .where(PrecioModel.libro_id == libro_id)
+                .order_by(PrecioModel.id)
+            )
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [self._to_entidad(modelo) for modelo in modelos]
 
 
 # ---------------------------------------------------------------------------
-# Repositorio de Libro (clave: ISBN)
+# Repositorio de Libro
 # ---------------------------------------------------------------------------
 
-class RepositorioLibroSQLAlchemy(IRepositorioLibro):
-    """Repositorio CRUD de Libro sobre la tabla `libros`."""
+class RepositorioLibro(RepositorioSQLAlchemy[Libro], IRepositorioLibro):
+    """Repositorio CRUD de Libro sobre la tabla `libros`.
 
-    # Carga anticipada de las relaciones necesarias para reconstruir el libro
-    # completo sin una consulta por cada registro del listado.
-    _OPCIONES_CARGA = (
-        selectinload(LibroModel.genero),
-        selectinload(LibroModel.editorial),
-        selectinload(LibroModel.precio).selectinload(PrecioModel.moneda),
-        selectinload(LibroModel.stock),
-    )
+    Persiste el libro junto con sus precios y su stock en una misma
+    transacción. Al actualizar sincroniza las listas de precios y el stock.
+    """
 
-    def __init__(self, conexion: ConexionDB) -> None:
-        self._conexion = conexion
+    modelo = LibroModel
 
-    def _buscar(self, sesion: Session, isbn: str) -> Optional[LibroModel]:
-        sentencia = (
-            select(LibroModel)
-            .options(*self._OPCIONES_CARGA)
-            .where(LibroModel.isbn == isbn)
-        )
-        return sesion.execute(sentencia).scalars().first()
-
-    def _to_modelo(self, libro: Libro) -> LibroModel:
-        return LibroModel(
-            isbn=libro.isbn,
-            titulo=libro.titulo,
-            autor=libro.autor,
-            editorial_id=libro.editorial.id_editorial,
-            genero_id=libro.genero.id_genero,
-            precio_id=libro.precio.id_precio,
+    def _opciones_carga(self) -> tuple:
+        """Carga anticipada de las relaciones del libro completo."""
+        return (
+            selectinload(LibroModel.genero),
+            selectinload(LibroModel.editorial),
+            selectinload(LibroModel.precios).selectinload(PrecioModel.moneda),
+            selectinload(LibroModel.stock),
         )
 
-    def crear(self, libro: Libro) -> Libro:
-        with self._conexion.transaccion() as sesion:
-            if self._buscar(sesion, libro.isbn) is not None:
-                raise ValueError(f"Ya existe un libro con ISBN {libro.isbn}")
-            sesion.add(self._to_modelo(libro))
-            sesion.flush()
-            return _libro_desde_modelo(self._buscar(sesion, libro.isbn))
+    def _to_entidad(self, modelo: LibroModel) -> Libro:
+        """Convierte el modelo ORM en entidad."""
+        return _libro_desde_modelo(modelo)
+
+    def _to_modelo(self, entidad: Libro) -> LibroModel:
+        """Convierte el libro, con sus precios y stock, en un modelo ORM."""
+        modelo = LibroModel(
+            id=entidad.id_libro,
+            isbn=entidad.isbn,
+            titulo=entidad.titulo,
+            autor=entidad.autor,
+            editorial_id=entidad.editorial.id_editorial,
+            genero_id=entidad.genero.id_genero,
+        )
+        modelo.precios = [
+            PrecioModel(
+                id=precio.id_precio,
+                moneda_id=precio.moneda.id_moneda,
+                valor=Decimal(str(precio.valor)),
+            )
+            for precio in entidad.precios
+        ]
+        if entidad.stock is not None:
+            modelo.stock = StockModel(
+                id_stock=entidad.stock.id_stock,
+                cantidad=entidad.stock.cantidad,
+                cantidad_minima=entidad.stock.cantidad_minima,
+            )
+        return modelo
+
+    def _actualizar_modelo(self, modelo: LibroModel,
+                           entidad: Libro) -> None:
+        """Copia los datos del libro y sincroniza precios y stock."""
+        modelo.isbn = entidad.isbn
+        modelo.titulo = entidad.titulo
+        modelo.autor = entidad.autor
+        modelo.editorial_id = entidad.editorial.id_editorial
+        modelo.genero_id = entidad.genero.id_genero
+
+        por_id = {p.id: p for p in modelo.precios}
+        ids_entidad = {p.id_precio for p in entidad.precios}
+        for precio in entidad.precios:
+            existente = por_id.get(precio.id_precio)
+            if existente is None:
+                modelo.precios.append(PrecioModel(
+                    id=precio.id_precio,
+                    moneda_id=precio.moneda.id_moneda,
+                    valor=Decimal(str(precio.valor)),
+                ))
+            else:
+                existente.moneda_id = precio.moneda.id_moneda
+                existente.valor = Decimal(str(precio.valor))
+        for id_precio, existente in por_id.items():
+            if id_precio not in ids_entidad:
+                modelo.precios.remove(existente)
+
+        if entidad.stock is None:
+            modelo.stock = None
+        elif modelo.stock is None:
+            modelo.stock = StockModel(
+                id_stock=entidad.stock.id_stock,
+                cantidad=entidad.stock.cantidad,
+                cantidad_minima=entidad.stock.cantidad_minima,
+            )
+        else:
+            modelo.stock.cantidad = entidad.stock.cantidad
+            modelo.stock.cantidad_minima = entidad.stock.cantidad_minima
 
     def leer_por_isbn(self, isbn: str) -> Optional[Libro]:
+        """Devuelve el libro con el ISBN dado, o None si no existe."""
         with self._conexion.obtener_sesion() as sesion:
-            modelo = self._buscar(sesion, isbn)
+            sentencia = (
+                select(LibroModel)
+                .options(*self._opciones_carga())
+                .where(LibroModel.isbn == isbn)
+            )
+            modelo = sesion.execute(sentencia).scalars().first()
             if modelo is None:
                 return None
             return _libro_desde_modelo(modelo)
 
-    def leer_todos(self) -> List[Libro]:
-        with self._conexion.obtener_sesion() as sesion:
-            sentencia = (
-                select(LibroModel)
-                .options(*self._OPCIONES_CARGA)
-                .order_by(LibroModel.isbn)
-            )
-            modelos = sesion.execute(sentencia).scalars().all()
-            return [_libro_desde_modelo(modelo) for modelo in modelos]
-
-    def actualizar(self, libro: Libro) -> Libro:
-        with self._conexion.transaccion() as sesion:
-            modelo = self._buscar(sesion, libro.isbn)
-            if modelo is None:
-                raise ValueError(
-                    f"No se encontró el libro con ISBN {libro.isbn} "
-                    f"para actualizar"
-                )
-            modelo.titulo = libro.titulo
-            modelo.autor = libro.autor
-            modelo.editorial_id = libro.editorial.id_editorial
-            modelo.genero_id = libro.genero.id_genero
-            modelo.precio_id = libro.precio.id_precio
-            sesion.flush()
-            sesion.expire(modelo)
-            return _libro_desde_modelo(self._buscar(sesion, libro.isbn))
-
-    def eliminar(self, isbn: str) -> bool:
-        with self._conexion.transaccion() as sesion:
-            modelo = self._buscar(sesion, isbn)
-            if modelo is None:
-                return False
-            sesion.delete(modelo)
-            return True
-
 
 # ---------------------------------------------------------------------------
-# Repositorio de Stock (clave: ISBN del libro asociado)
+# Repositorio de Stock (clave: id del libro asociado)
 # ---------------------------------------------------------------------------
 
-class RepositorioStockSQLAlchemy(IRepositorioStock):
-    """Repositorio CRUD de Stock sobre la tabla `stock`."""
+class RepositorioStock(IRepositorioStock):
+    """Repositorio CRUD de Stock sobre la tabla `stock` (1 a 1 con libro)."""
 
     def __init__(self, conexion: ConexionDB) -> None:
+        """Crea el repositorio.
+
+        Args:
+            conexion (ConexionDB): Conexión a la base de datos.
+        """
         self._conexion = conexion
 
-    def _buscar(self, sesion: Session, libro_isbn: str) -> Optional[StockModel]:
-        sentencia = select(StockModel).where(
-            StockModel.libro_isbn == libro_isbn
+    _OPCIONES_CARGA = (
+        selectinload(StockModel.libro).selectinload(LibroModel.editorial),
+        selectinload(StockModel.libro).selectinload(LibroModel.genero),
+    )
+
+    def _buscar(self, sesion: Session, libro_id: int) -> Optional[StockModel]:
+        """Devuelve el modelo de stock del libro, o None si no existe."""
+        sentencia = (
+            select(StockModel)
+            .options(*self._OPCIONES_CARGA)
+            .where(StockModel.libro_id == libro_id)
         )
         return sesion.execute(sentencia).scalars().first()
 
-    def _validar_libro(self, stock: Stock) -> str:
-        if not stock.libro_isbn:
+    def _validar_libro(self, stock: Stock) -> int:
+        """Devuelve el id del libro del stock.
+
+        Raises:
+            ValueError: Si el stock no tiene un libro asignado.
+        """
+        if stock.libro is None:
             raise ValueError(
-                "El stock debe tener asignado el ISBN del libro asociado"
+                "El stock debe tener asignado el libro asociado"
             )
-        return stock.libro_isbn
+        return stock.libro.id
 
     def crear(self, stock: Stock) -> Stock:
-        libro_isbn = self._validar_libro(stock)
+        """Crea un registro de stock para el libro de `stock.libro`.
+
+        Raises:
+            ValueError: Si el stock no tiene libro o ya existe stock.
+        """
+        libro_id = self._validar_libro(stock)
         with self._conexion.transaccion() as sesion:
-            if self._buscar(sesion, libro_isbn) is not None:
+            if self._buscar(sesion, libro_id) is not None:
                 raise ValueError(
-                    f"Ya existe stock para el libro {libro_isbn}"
+                    f"Ya existe stock para el libro {libro_id}"
                 )
             sesion.add(
                 StockModel(
                     id_stock=stock.id_stock,
-                    libro_isbn=libro_isbn,
+                    libro_id=libro_id,
                     cantidad=stock.cantidad,
                     cantidad_minima=stock.cantidad_minima,
                 )
             )
             sesion.flush()
-            return _stock_desde_modelo(self._buscar(sesion, libro_isbn))
+            return _stock_desde_modelo(self._buscar(sesion, libro_id))
 
-    def leer_por_libro(self, libro_isbn: str) -> Optional[Stock]:
+    def leer_por_libro(self, libro_id: int) -> Optional[Stock]:
+        """Devuelve el stock del libro dado, o None si no tiene."""
         with self._conexion.obtener_sesion() as sesion:
-            modelo = self._buscar(sesion, libro_isbn)
+            modelo = self._buscar(sesion, libro_id)
             if modelo is None:
                 return None
             return _stock_desde_modelo(modelo)
 
     def leer_todos(self) -> List[Stock]:
-        """Devuelve todos los registros de stock."""
+        """Devuelve todos los registros de stock, ordenados por id."""
         with self._conexion.obtener_sesion() as sesion:
-            sentencia = select(StockModel).order_by(StockModel.id_stock)
+            sentencia = (
+                select(StockModel)
+                .options(*self._OPCIONES_CARGA)
+                .order_by(StockModel.id_stock)
+            )
             modelos = sesion.execute(sentencia).scalars().all()
             return [_stock_desde_modelo(modelo) for modelo in modelos]
 
     def actualizar(self, stock: Stock) -> Stock:
-        libro_isbn = self._validar_libro(stock)
+        """Actualiza las cantidades del stock del libro.
+
+        Raises:
+            ValueError: Si no hay stock registrado para ese libro.
+        """
+        libro_id = self._validar_libro(stock)
         with self._conexion.transaccion() as sesion:
-            modelo = self._buscar(sesion, libro_isbn)
+            modelo = self._buscar(sesion, libro_id)
             if modelo is None:
                 raise ValueError(
-                    f"No se encontró stock para el libro {libro_isbn}"
+                    f"No se encontró stock para el libro {libro_id}"
                 )
             modelo.cantidad = stock.cantidad
             modelo.cantidad_minima = stock.cantidad_minima
             sesion.flush()
             sesion.expire(modelo)
-            return _stock_desde_modelo(self._buscar(sesion, libro_isbn))
+            return _stock_desde_modelo(self._buscar(sesion, libro_id))
 
-    def eliminar(self, libro_isbn: str) -> bool:
+    def eliminar(self, libro_id: int) -> bool:
+        """Elimina el stock del libro dado. Devuelve True si existía."""
         with self._conexion.transaccion() as sesion:
-            modelo = self._buscar(sesion, libro_isbn)
+            modelo = self._buscar(sesion, libro_id)
             if modelo is None:
                 return False
             sesion.delete(modelo)
@@ -1238,17 +779,23 @@ class RepositorioStockSQLAlchemy(IRepositorioStock):
 # Repositorio de CotizacionDolar (clave compuesta: tipo + fecha)
 # ---------------------------------------------------------------------------
 
-class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
+class RepositorioCotizacionDolar(IRepositorioCotizacionDolar):
     """Repositorio CRUD de CotizacionDolar sobre la tabla `cotizaciones`."""
 
     _OPCIONES_CARGA = (selectinload(CotizacionDolarModel.tipo),)
 
     def __init__(self, conexion: ConexionDB) -> None:
+        """Crea el repositorio.
+
+        Args:
+            conexion (ConexionDB): Conexión a la base de datos.
+        """
         self._conexion = conexion
 
     def _buscar(
         self, sesion: Session, tipo_id: int, fecha: datetime.date
     ) -> Optional[CotizacionDolarModel]:
+        """Busca el modelo por tipo y fecha."""
         sentencia = (
             select(CotizacionDolarModel)
             .options(*self._OPCIONES_CARGA)
@@ -1262,6 +809,7 @@ class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
     def _buscar_por_id(
         self, sesion: Session, id_cotizacion: int
     ) -> Optional[CotizacionDolarModel]:
+        """Busca el modelo por su identificador."""
         sentencia = (
             select(CotizacionDolarModel)
             .options(*self._OPCIONES_CARGA)
@@ -1270,6 +818,11 @@ class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
         return sesion.execute(sentencia).scalars().first()
 
     def crear(self, cotizacion: CotizacionDolar) -> CotizacionDolar:
+        """Crea una cotización.
+
+        Raises:
+            ValueError: Si ya existe una del mismo tipo y fecha.
+        """
         tipo_id = cotizacion.tipo.id_tipo
         with self._conexion.transaccion() as sesion:
             if self._buscar(sesion, tipo_id, cotizacion.fecha) is not None:
@@ -1293,6 +846,7 @@ class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
     def leer_por_tipo_y_fecha(
         self, tipo_id: int, fecha: datetime.date
     ) -> Optional[CotizacionDolar]:
+        """Devuelve la cotización de un tipo y fecha, o None."""
         with self._conexion.obtener_sesion() as sesion:
             modelo = self._buscar(sesion, tipo_id, fecha)
             if modelo is None:
@@ -1302,6 +856,7 @@ class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
     def leer_historico_por_tipo(
         self, tipo_id: int
     ) -> List[CotizacionDolar]:
+        """Devuelve el histórico de un tipo, ordenado por fecha."""
         with self._conexion.obtener_sesion() as sesion:
             sentencia = (
                 select(CotizacionDolarModel)
@@ -1324,6 +879,11 @@ class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
             return [_cotizacion_desde_modelo(modelo) for modelo in modelos]
 
     def actualizar(self, cotizacion: CotizacionDolar) -> CotizacionDolar:
+        """Actualiza una cotización existente.
+
+        Raises:
+            ValueError: Si no se encuentra la cotización.
+        """
         with self._conexion.transaccion() as sesion:
             modelo = self._buscar_por_id(sesion, cotizacion.id_cotizacion)
             if modelo is None:
@@ -1338,6 +898,7 @@ class RepositorioCotizacionDolarSQLAlchemy(IRepositorioCotizacionDolar):
             return _cotizacion_desde_modelo(modelo)
 
     def eliminar(self, tipo_id: int, fecha: datetime.date) -> bool:
+        """Elimina la cotización de un tipo y fecha. True si existía."""
         with self._conexion.transaccion() as sesion:
             modelo = self._buscar(sesion, tipo_id, fecha)
             if modelo is None:
