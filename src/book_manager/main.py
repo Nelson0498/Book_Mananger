@@ -13,6 +13,7 @@ from book_manager.migrations.migrations import (
 )
 from book_manager.preload_data.preload_data import cargar_datos_iniciales
 from book_manager.repositories.repositories import (
+    RepositorioAuditoria,
     RepositorioCotizacionDolar,
     RepositorioEditorial,
     RepositorioGenero,
@@ -24,6 +25,7 @@ from book_manager.repositories.repositories import (
     RepositorioTipoCotizacion,
 )
 from book_manager.services.services import (
+    ServicioAuditoria,
     ServicioCotizacionDolar,
     ServicioEditorial,
     ServicioGenero,
@@ -86,29 +88,37 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
     repo_libro = RepositorioLibro(conexion)
     repo_cotizacion = RepositorioCotizacionDolar(conexion)
     repo_precio_web = RepositorioPrecioWeb(conexion)
+    repo_auditoria = RepositorioAuditoria(conexion)
 
     # ------------------------------------------------------------------
-    # 3. Servicios
+    # 3. Servicios (todos reciben el servicio de auditoría)
     # ------------------------------------------------------------------
-    svc_genero = ServicioGenero(repo_genero, repo_libro)
-    svc_editorial = ServicioEditorial(repo_editorial, repo_libro)
-    svc_moneda = ServicioMoneda(repo_moneda, repo_precio)
-    svc_tipo_cotizacion = ServicioTipoCotizacion(
-        repo_tipo_cotizacion, repo_cotizacion,
+    svc_auditoria = ServicioAuditoria(repo_auditoria)
+    svc_genero = ServicioGenero(repo_genero, repo_libro, svc_auditoria)
+    svc_editorial = ServicioEditorial(
+        repo_editorial, repo_libro, svc_auditoria,
     )
-    svc_precio = ServicioPrecio(repo_precio, repo_moneda, repo_libro)
-    svc_stock = ServicioStock(repo_stock, repo_libro)
+    svc_moneda = ServicioMoneda(repo_moneda, repo_precio, svc_auditoria)
+    svc_tipo_cotizacion = ServicioTipoCotizacion(
+        repo_tipo_cotizacion, repo_cotizacion, svc_auditoria,
+    )
+    svc_precio = ServicioPrecio(
+        repo_precio, repo_moneda, repo_libro, svc_auditoria,
+    )
+    svc_stock = ServicioStock(repo_stock, repo_libro, svc_auditoria)
     svc_libro = ServicioLibro(
         repo_libro, repo_genero, repo_editorial,
-        repo_moneda, repo_precio, repo_stock,
+        repo_moneda, repo_precio, repo_stock, svc_auditoria,
     )
     svc_cotizacion = ServicioCotizacionDolar(
-        repo_cotizacion, repo_tipo_cotizacion,
+        repo_cotizacion, repo_tipo_cotizacion, svc_auditoria,
     )
     svc_scraping = ServicioScraping(
-        repo_libro, repo_precio_web, svc_cotizacion,
+        repo_libro, repo_precio_web, svc_cotizacion, svc_auditoria,
     )
-    svc_reportes = ServicioReportes(repo_precio_web, svc_cotizacion)
+    svc_reportes = ServicioReportes(
+        repo_precio_web, svc_cotizacion, svc_auditoria,
+    )
 
     # ------------------------------------------------------------------
     # 4. Consola

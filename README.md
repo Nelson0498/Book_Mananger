@@ -191,6 +191,14 @@ export PYTHONPATH=../..:.      # En Windows PowerShell: $env:PYTHONPATH = "../..
 python -m scrapy crawl cuspide -a libros=libros.json
 ```
 
+## Auditoría
+
+Cada operación de los servicios queda registrada en la tabla `auditorias`
+(`accion`, `fecha`, `detalles`) mediante el decorador `@auditar("VERBO_ENTIDAD")`
+de `services.py`. Si la operación falla se registra `VERBO_ENTIDAD_ERROR` con el
+mensaje del error y la excepción se vuelve a lanzar. Un fallo al auditar nunca
+interrumpe la operación original. El historial se consulta desde el menú.
+
 ## Reglas de negocio
 
 - **Precio en pesos obligatorio:** todo libro tiene un precio en ARS; no se puede

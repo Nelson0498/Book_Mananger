@@ -20,6 +20,7 @@ from sqlalchemy.orm import Session, selectinload
 
 from book_manager.database.connection import ConexionDB
 from book_manager.entities.entities import (
+    Auditoria,
     CotizacionDolar,
     EntidadBase,
     Editorial,
@@ -32,6 +33,7 @@ from book_manager.entities.entities import (
     TipoCotizacion,
 )
 from book_manager.models.models import (
+    AuditoriaModel,
     Base,
     CotizacionDolarModel,
     EditorialModel,
@@ -1044,3 +1046,99 @@ class RepositorioPrecioWeb:
              if p.fecha_extraccion == ultima[p.libro.id]),
             key=lambda p: (p.libro.id, p.posicion),
         )
+
+
+# ---------------------------------------------------------------------------
+# Repositorio de Auditoria
+# ---------------------------------------------------------------------------
+
+def _auditoria_desde_modelo(modelo: AuditoriaModel) -> Auditoria:
+    """Convierte un modelo ORM de auditoría en su entidad de dominio."""
+    return Auditoria(
+        id_auditoria=modelo.id,
+        accion=modelo.accion,
+        fecha=modelo.fecha,
+        detalles=modelo.detalles,
+    )
+
+
+class RepositorioAuditoria:
+    """Repositorio de Auditoria sobre la tabla `auditorias`.
+
+    Los registros de auditoría solo se crean y se leen: no se modifican ni se
+    eliminan.
+    """
+
+    def __init__(self, conexion: ConexionDB) -> None:
+        """Crea el repositorio.
+
+        Args:
+            conexion (ConexionDB): Conexión a la base de datos.
+        """
+        self._conexion = conexion
+
+    def crear(self, auditoria: Auditoria) -> Auditoria:
+        """Persiste un registro de auditoría.
+
+        Args:
+            auditoria (Auditoria): Registro a persistir.
+
+        Returns:
+            Auditoria: El registro persistido, con su id asignado.
+        """
+        with self._conexion.transaccion() as sesion:
+            modelo = AuditoriaModel(
+                accion=auditoria.accion,
+                fecha=auditoria.fecha,
+                detalles=auditoria.detalles,
+            )
+            sesion.add(modelo)
+            sesion.flush()
+            return _auditoria_desde_modelo(modelo)
+
+    def leer_todos(self, limite: Optional[int] = None) -> List[Auditoria]:
+        """Devuelve los registros, del más reciente al más antiguo.
+
+        Args:
+            limite (Optional[int]): Cantidad máxima de registros; None para
+                devolverlos todos.
+
+        Returns:
+            List[Auditoria]: Registros ordenados por fecha descendente.
+        """
+        return self._leer(limite)
+
+    def leer_por_accion(self, accion: str,
+                        limite: Optional[int] = None) -> List[Auditoria]:
+        """Devuelve los registros de una acción, del más reciente primero.
+
+        Args:
+            accion (str): Acción a filtrar (por ejemplo, CREAR_LIBRO).
+            limite (Optional[int]): Cantidad máxima de registros.
+
+        Returns:
+            List[Auditoria]: Registros de esa acción.
+        """
+        return self._leer(limite, AuditoriaModel.accion == accion)
+
+    def _leer(self, limite: Optional[int], *condiciones) -> List[Auditoria]:
+        """Lee registros ordenados por fecha descendente.
+
+        Args:
+            limite (Optional[int]): Cantidad máxima de registros.
+            *condiciones: Condiciones de filtrado de SQLAlchemy.
+
+        Returns:
+            List[Auditoria]: Registros que cumplen las condiciones.
+        """
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = (
+                select(AuditoriaModel)
+                .where(*condiciones)
+                .order_by(AuditoriaModel.fecha.desc(),
+                          AuditoriaModel.id.desc())
+            )
+            if limite is not None:
+                sentencia = sentencia.limit(limite)
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [_auditoria_desde_modelo(modelo) for modelo in modelos]

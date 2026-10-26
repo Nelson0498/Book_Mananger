@@ -928,3 +928,55 @@ class PrecioWeb(EntidadBase):
             f"PrecioWeb(libro={self.__libro.id}, "
             f"precio_web={self.__precio_web}, coincide={self.__coincide})"
         )
+
+
+class Auditoria(EntidadBase):
+    """Registro de una operación realizada en el sistema."""
+
+    def __init__(self, accion: str, fecha: datetime,
+                 detalles: Optional[str] = None,
+                 id_auditoria: Optional[int] = None) -> None:
+        """Crea un registro de auditoría.
+
+        Args:
+            accion (str): Acción auditada (por ejemplo, CREAR_LIBRO).
+            fecha (datetime): Momento en que se ejecutó la acción.
+            detalles (Optional[str]): Detalle de la operación.
+            id_auditoria (Optional[int]): Identificador; None si aún no se
+                persistió (lo asigna la base de datos).
+
+        Raises:
+            ValueError: Si la acción está vacía.
+        """
+        if not accion or not accion.strip():
+            raise ValueError("La acción de auditoría no puede estar vacía")
+        self.__id_auditoria = id_auditoria
+        self.__accion = accion
+        self.__fecha = fecha
+        self.__detalles = detalles
+
+    @property
+    def id(self) -> Optional[int]:
+        """Identificador del registro (None si aún no se persistió)."""
+        return self.__id_auditoria
+
+    @property
+    def accion(self) -> str:
+        """Acción auditada."""
+        return self.__accion
+
+    @property
+    def fecha(self) -> datetime:
+        """Momento en que se ejecutó la acción."""
+        return self.__fecha
+
+    @property
+    def detalles(self) -> Optional[str]:
+        """Detalle de la operación."""
+        return self.__detalles
+
+    def __repr__(self) -> str:
+        """Devuelve una representación técnica del registro."""
+        return (
+            f"Auditoria(id={self.__id_auditoria}, accion='{self.__accion}')"
+        )

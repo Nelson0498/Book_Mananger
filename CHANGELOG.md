@@ -1,5 +1,13 @@
 # Sprint 3
 
+[Ejercicio 06]
+- Nueva tabla `auditorias` (`AuditoriaModel`) con `accion`, `fecha` y `detalles`, la entidad `Auditoria` y el `RepositorioAuditoria` (`crear`, `leer_todos(limite)` y `leer_por_accion`, del más reciente al más antiguo).
+- `ServicioAuditoria` con `registrar`, `listar` y `listar_por_accion`. No se audita a sí mismo.
+- Decorador `@auditar("VERBO_ENTIDAD")` en `services.py`: registra cada ejecución del método decorado y, si falla, registra `<ACCION>_ERROR` con el mensaje y relanza el error. Los detalles incluyen la clase, el método, los argumentos y se recortan a 1000 caracteres.
+- Clase base `ServicioBase` que recibe el `ServicioAuditoria` (opcional) y expone `_registrar_auditoria`, que nunca propaga errores de auditoría.
+- Todos los métodos públicos de todos los servicios están auditados (CRUD, cotizaciones por API, lista bimonetaria, exportación a CSV, scraping, alertas y reporte Excel).
+- `main.py` crea primero el repositorio y el servicio de auditoría y se los pasa a todos los servicios.
+
 [Ejercicio 05]
 - Nuevo `ServicioReportes.generar_reporte_excel()`: arma un `DataFrame` de pandas y lo escribe con `to_excel(engine="openpyxl")` en `reportes/reporte_precios_YYYYMMDD_HHMMSS.xlsx`.
 - Columnas: `Libro`, `Precio interno`, `Precio web`, `Diferencia` y `Fecha de extracción` (formato `AAAA-MM-DD HH:MM`), con una fila por cada libro con coincidencia en la última extracción. Se ajusta el ancho de las columnas con openpyxl.

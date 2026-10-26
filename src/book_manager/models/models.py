@@ -327,3 +327,22 @@ class PrecioWebModel(Base):
             f"PrecioWebModel(id={self.id}, libro_id={self.libro_id}, "
             f"precio_web={self.precio_web})"
         )
+
+
+class AuditoriaModel(Base):
+    """Tabla `auditorias`: registro de las operaciones del sistema."""
+
+    __tablename__ = "auditorias"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    accion: Mapped[str] = mapped_column(String(100), nullable=False)
+    fecha: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False, default=datetime.now
+    )
+    detalles: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+
+    def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
+        return f"AuditoriaModel(id={self.id}, accion='{self.accion}')"
