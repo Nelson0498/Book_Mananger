@@ -13,7 +13,7 @@ confirma o se revierte completa.
 import abc
 import datetime
 from decimal import Decimal
-from typing import ClassVar, Generic, List, Optional, TypeVar
+from typing import ClassVar, Dict, Generic, List, Optional, TypeVar
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session, selectinload
@@ -27,6 +27,7 @@ from book_manager.entities.entities import (
     Libro,
     Moneda,
     Precio,
+    PrecioWeb,
     Stock,
     TipoCotizacion,
 )
@@ -38,6 +39,7 @@ from book_manager.models.models import (
     LibroModel,
     MonedaModel,
     PrecioModel,
+    PrecioWebModel,
     StockModel,
     TipoCotizacionModel,
 )
@@ -905,3 +907,140 @@ class RepositorioCotizacionDolar(IRepositorioCotizacionDolar):
                 return False
             sesion.delete(modelo)
             return True
+
+
+# ---------------------------------------------------------------------------
+# Repositorio de PrecioWeb (resultados del scraper)
+# ---------------------------------------------------------------------------
+
+def _precio_web_desde_modelo(modelo: PrecioWebModel) -> PrecioWeb:
+    """Convierte un modelo ORM de precio web en su entidad de dominio."""
+    return PrecioWeb(
+        id_precio_web=modelo.id,
+        libro=_libro_desde_modelo(modelo.libro),
+        posicion=modelo.posicion,
+        titulo_web=modelo.titulo_web,
+        url=modelo.url,
+        precio_web=float(modelo.precio_web),
+        fecha_extraccion=modelo.fecha_extraccion,
+        isbn_web=modelo.isbn_web,
+        url_imagen=modelo.url_imagen,
+        formas_pago=modelo.formas_pago,
+        descripcion=modelo.descripcion,
+        coincide=modelo.coincide,
+        similitud=(
+            None if modelo.similitud is None else float(modelo.similitud)
+        ),
+    )
+
+
+class RepositorioPrecioWeb:
+    """Repositorio de PrecioWeb sobre la tabla `precios_web`.
+
+    Los registros solo se crean y se leen: cada ejecución del scraper agrega
+    nuevas filas y conserva las anteriores como histórico.
+    """
+
+    _OPCIONES_CARGA = (
+        selectinload(PrecioWebModel.libro).selectinload(LibroModel.genero),
+        selectinload(PrecioWebModel.libro).selectinload(LibroModel.editorial),
+        selectinload(PrecioWebModel.libro).selectinload(
+            LibroModel.precios
+        ).selectinload(PrecioModel.moneda),
+        selectinload(PrecioWebModel.libro).selectinload(LibroModel.stock),
+    )
+
+    def __init__(self, conexion: ConexionDB) -> None:
+        """Crea el repositorio.
+
+        Args:
+            conexion (ConexionDB): Conexión a la base de datos.
+        """
+        self._conexion = conexion
+
+    def crear(self, precio_web: PrecioWeb) -> PrecioWeb:
+        """Persiste un precio web y devuelve la entidad con su id asignado.
+
+        Args:
+            precio_web (PrecioWeb): Resultado a persistir.
+
+        Returns:
+            PrecioWeb: El registro persistido.
+        """
+        with self._conexion.transaccion() as sesion:
+            modelo = PrecioWebModel(
+                libro_id=precio_web.libro.id,
+                posicion=precio_web.posicion,
+                titulo_web=precio_web.titulo_web,
+                isbn_web=precio_web.isbn_web,
+                url=precio_web.url,
+                precio_web=Decimal(str(precio_web.precio_web)),
+                url_imagen=precio_web.url_imagen,
+                formas_pago=precio_web.formas_pago,
+                descripcion=precio_web.descripcion,
+                coincide=precio_web.coincide,
+                similitud=(
+                    None if precio_web.similitud is None
+                    else Decimal(str(round(precio_web.similitud, 4)))
+                ),
+                fecha_extraccion=precio_web.fecha_extraccion,
+            )
+            sesion.add(modelo)
+            sesion.flush()
+            sesion.expire(modelo)
+            return _precio_web_desde_modelo(modelo)
+
+    def _leer(self, *condiciones) -> List[PrecioWeb]:
+        """Lee los precios web que cumplen las condiciones dadas."""
+        with self._conexion.obtener_sesion() as sesion:
+            sentencia = (
+                select(PrecioWebModel)
+                .options(*self._OPCIONES_CARGA)
+                .where(*condiciones)
+                .order_by(PrecioWebModel.id)
+            )
+            modelos = sesion.execute(sentencia).scalars().all()
+            return [_precio_web_desde_modelo(modelo) for modelo in modelos]
+
+    def leer_por_libro(self, libro_id: int) -> List[PrecioWeb]:
+        """Devuelve el histórico de precios web de un libro.
+
+        Args:
+            libro_id (int): Identificador del libro.
+
+        Returns:
+            List[PrecioWeb]: Histórico de resultados del libro.
+        """
+        return self._leer(PrecioWebModel.libro_id == libro_id)
+
+    def leer_desde(self, fecha: datetime.datetime) -> List[PrecioWeb]:
+        """Devuelve los precios web extraídos desde un momento dado.
+
+        Args:
+            fecha (datetime.datetime): Límite inferior de `fecha_extraccion`.
+
+        Returns:
+            List[PrecioWeb]: Resultados de las extracciones posteriores.
+        """
+        return self._leer(PrecioWebModel.fecha_extraccion >= fecha)
+
+    def leer_ultima_extraccion(self) -> List[PrecioWeb]:
+        """Devuelve los resultados coincidentes de la última extracción.
+
+        Para cada libro se toma la fecha de extracción más reciente y se
+        devuelven las filas marcadas como coincidentes de esa fecha.
+
+        Returns:
+            List[PrecioWeb]: Filas con `coincide=True`, ordenadas por libro.
+        """
+        coincidentes = self._leer(PrecioWebModel.coincide.is_(True))
+        ultima: Dict[int, datetime.datetime] = {}
+        for precio in coincidentes:
+            actual = ultima.get(precio.libro.id)
+            if actual is None or precio.fecha_extraccion > actual:
+                ultima[precio.libro.id] = precio.fecha_extraccion
+        return sorted(
+            (p for p in coincidentes
+             if p.fecha_extraccion == ultima[p.libro.id]),
+            key=lambda p: (p.libro.id, p.posicion),
+        )

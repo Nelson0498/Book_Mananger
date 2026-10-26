@@ -16,17 +16,20 @@ dominio de `entities/entities.py`, que conservan su encapsulamiento. La
 conversión entre ambos mundos se realiza en los repositorios.
 """
 
-from datetime import date
+from datetime import date, datetime
 from decimal import Decimal
 from typing import List, Optional
 
 from sqlalchemy import (
+    Boolean,
     CheckConstraint,
     Date,
+    DateTime,
     ForeignKey,
     Integer,
     Numeric,
     String,
+    Text,
     UniqueConstraint,
 )
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
@@ -193,6 +196,9 @@ class LibroModel(Base):
     stock: Mapped[Optional["StockModel"]] = relationship(
         back_populates="libro", uselist=False, cascade="all, delete-orphan"
     )
+    precios_web: Mapped[List["PrecioWebModel"]] = relationship(
+        back_populates="libro", cascade="all, delete-orphan"
+    )
 
     def __repr__(self) -> str:
         """Devuelve una representación técnica del modelo."""
@@ -272,4 +278,52 @@ class CotizacionDolarModel(Base):
         return (
             f"CotizacionDolarModel(id_cotizacion={self.id_cotizacion}, "
             f"fecha={self.fecha})"
+        )
+
+
+class PrecioWebModel(Base):
+    """Tabla `precios_web`: precios de la competencia obtenidos con el scraper.
+
+    Cada fila es un resultado de la búsqueda de un libro del catálogo en el
+    sitio de Cúspide. `coincide` indica si el resultado es el mismo libro y
+    `similitud` guarda el grado de parecido con el título interno.
+    """
+
+    __tablename__ = "precios_web"
+
+    id: Mapped[int] = mapped_column(
+        Integer, primary_key=True, autoincrement=True
+    )
+    libro_id: Mapped[int] = mapped_column(
+        ForeignKey("libros.id"), nullable=False, index=True
+    )
+    posicion: Mapped[int] = mapped_column(Integer, nullable=False)
+    titulo_web: Mapped[str] = mapped_column(String(300), nullable=False)
+    isbn_web: Mapped[Optional[str]] = mapped_column(String(20), nullable=True)
+    url: Mapped[str] = mapped_column(String(500), nullable=False)
+    precio_web: Mapped[Decimal] = mapped_column(
+        Numeric(12, 2), nullable=False
+    )
+    url_imagen: Mapped[Optional[str]] = mapped_column(
+        String(500), nullable=True
+    )
+    formas_pago: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    descripcion: Mapped[Optional[str]] = mapped_column(Text, nullable=True)
+    coincide: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
+    similitud: Mapped[Optional[Decimal]] = mapped_column(
+        Numeric(5, 4), nullable=True
+    )
+    fecha_extraccion: Mapped[datetime] = mapped_column(
+        DateTime, nullable=False
+    )
+
+    libro: Mapped["LibroModel"] = relationship(back_populates="precios_web")
+
+    def __repr__(self) -> str:
+        """Devuelve una representación técnica del modelo."""
+        return (
+            f"PrecioWebModel(id={self.id}, libro_id={self.libro_id}, "
+            f"precio_web={self.precio_web})"
         )

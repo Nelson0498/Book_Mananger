@@ -9,6 +9,9 @@ crear también sus Precios y su Stock asociados).
 import datetime
 import json
 import os
+import subprocess
+import sys
+import tempfile
 import urllib.error
 import urllib.request
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
@@ -30,14 +33,20 @@ from book_manager.repositories.repositories import (
     RepositorioLibro,
     RepositorioMoneda,
     RepositorioPrecio,
+    RepositorioPrecioWeb,
     RepositorioStock,
     RepositorioTipoCotizacion,
 )
 
+# Carpeta del paquete `book_manager` y carpeta `src` que la contiene.
+_CARPETA_PAQUETE = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+_CARPETA_SRC = os.path.dirname(_CARPETA_PAQUETE)
+
+# Carpeta del proyecto Scrapy (contiene `scrapy.cfg`).
+CARPETA_SCRAPER = os.path.join(_CARPETA_PAQUETE, "scraper")
+
 # Carpeta donde se guardan los reportes generados (CSV y Excel).
-CARPETA_REPORTES = os.path.join(
-    os.path.dirname(os.path.dirname(os.path.abspath(__file__))), "reportes"
-)
+CARPETA_REPORTES = os.path.join(_CARPETA_PAQUETE, "reportes")
 
 # Código de la moneda en la que todo libro debe tener precio obligatorio.
 MONEDA_BASE = "ARS"
@@ -1417,3 +1426,111 @@ class ServicioLibro:
             )
             for libro in self.listar()
         ]
+
+
+# ---------------------------------------------------------------------------
+# ServicioScraping
+# ---------------------------------------------------------------------------
+
+class ResultadoScraping(NamedTuple):
+    """Resumen de una ejecución del scraper.
+
+    Attributes:
+        libros_buscados (int): Libros del catálogo que se buscaron.
+        resultados (int): Resultados de Cúspide guardados en la ejecución.
+        coincidencias (int): Resultados que coinciden con un libro propio.
+    """
+
+    libros_buscados: int
+    resultados: int
+    coincidencias: int
+
+
+class ServicioScraping:
+    """Ejecuta el scraper de Cúspide para los libros del catálogo.
+
+    Scrapy se ejecuta en un subproceso: el reactor de Twisted no puede
+    reiniciarse dentro del mismo proceso y la consola puede pedir el
+    scraping varias veces. El pipeline del spider guarda los resultados en la
+    base de datos usando `DATABASE_URL`, que el subproceso hereda.
+    """
+
+    def __init__(self, repositorio_libro: RepositorioLibro,
+                 repositorio_precio_web: RepositorioPrecioWeb) -> None:
+        """Crea el servicio.
+
+        Args:
+            repositorio_libro (RepositorioLibro): Repositorio de libros.
+            repositorio_precio_web (RepositorioPrecioWeb): Repositorio de los
+                precios obtenidos de la web.
+        """
+        self._repositorio_libro = repositorio_libro
+        self._repositorio_precio_web = repositorio_precio_web
+
+    def ejecutar(self) -> ResultadoScraping:
+        """Busca en Cúspide cada libro del catálogo y guarda los precios.
+
+        Returns:
+            ResultadoScraping: Resumen de la ejecución.
+
+        Raises:
+            OperacionInvalidaError: Si el catálogo no tiene libros.
+            ErrorServicio: Si el scraper termina con error.
+        """
+        libros = self._repositorio_libro.leer_todos()
+        if not libros:
+            raise OperacionInvalidaError(
+                "No hay libros en el catálogo para buscar"
+            )
+
+        inicio = datetime.datetime.now()
+        self._ejecutar_spider(libros)
+        extraidos = self._repositorio_precio_web.leer_desde(inicio)
+
+        return ResultadoScraping(
+            libros_buscados=len(libros),
+            resultados=len(extraidos),
+            coincidencias=sum(1 for p in extraidos if p.coincide),
+        )
+
+    @staticmethod
+    def _ejecutar_spider(libros: List[Libro]) -> None:
+        """Lanza `scrapy crawl cuspide` en un subproceso.
+
+        Args:
+            libros (List[Libro]): Libros del catálogo a buscar.
+
+        Raises:
+            ErrorServicio: Si el subproceso termina con error.
+        """
+        datos = [
+            {"id": libro.id_libro, "titulo": libro.titulo, "isbn": libro.isbn}
+            for libro in libros
+        ]
+        with tempfile.TemporaryDirectory() as carpeta:
+            ruta = os.path.join(carpeta, "libros.json")
+            with open(ruta, mode="w", encoding="utf-8") as archivo:
+                json.dump(datos, archivo, ensure_ascii=False)
+
+            entorno = {
+                **os.environ,
+                "PYTHONPATH": os.pathsep.join(
+                    [_CARPETA_SRC, CARPETA_SCRAPER,
+                     os.environ.get("PYTHONPATH", "")]
+                ),
+            }
+            proceso = subprocess.run(
+                [sys.executable, "-m", "scrapy", "crawl", "cuspide",
+                 "-a", f"libros={ruta}"],
+                cwd=CARPETA_SCRAPER,
+                env=entorno,
+                capture_output=True,
+                text=True,
+            )
+
+        if proceso.returncode != 0:
+            detalle = "\n".join(proceso.stderr.strip().splitlines()[-8:])
+            raise ErrorServicio(
+                f"El scraper terminó con error ({proceso.returncode}):\n"
+                f"{detalle}"
+            )

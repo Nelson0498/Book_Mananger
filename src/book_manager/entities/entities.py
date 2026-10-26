@@ -10,7 +10,7 @@ pertenecen, y el `Libro` conoce sus precios (uno por moneda) y su stock.
 """
 
 import abc
-from datetime import date
+from datetime import date, datetime
 from typing import List, Optional
 
 
@@ -798,4 +798,133 @@ class Libro(EntidadBase):
         return (
             f"Libro(id_libro={self.__id_libro}, isbn='{self.__isbn}', "
             f"titulo='{self.__titulo}')"
+        )
+
+
+class PrecioWeb(EntidadBase):
+    """Precio de un libro observado en el sitio de un competidor.
+
+    Cada registro se obtiene al ejecutar el scraper y queda asociado al
+    libro del catálogo con el que se buscó.
+    """
+
+    def __init__(self, libro: Libro, posicion: int, titulo_web: str,
+                 url: str, precio_web: float, fecha_extraccion: datetime,
+                 id_precio_web: Optional[int] = None,
+                 isbn_web: Optional[str] = None,
+                 url_imagen: Optional[str] = None,
+                 formas_pago: Optional[str] = None,
+                 descripcion: Optional[str] = None,
+                 coincide: bool = False,
+                 similitud: Optional[float] = None) -> None:
+        """Crea un precio web.
+
+        Args:
+            libro (Libro): Libro del catálogo con el que se buscó.
+            posicion (int): Posición del resultado en la búsqueda (1..10).
+            titulo_web (str): Título informado por el sitio.
+            url (str): URL de la ficha del producto.
+            precio_web (float): Precio en pesos informado por el sitio.
+            fecha_extraccion (datetime): Momento de la extracción.
+            id_precio_web (Optional[int]): Identificador; None si aún no se
+                persistió (lo asigna la base de datos).
+            isbn_web (Optional[str]): ISBN informado por el sitio.
+            url_imagen (Optional[str]): URL de la imagen del producto.
+            formas_pago (Optional[str]): Formas de pago como texto JSON.
+            descripcion (Optional[str]): Descripción detallada.
+            coincide (bool): True si el resultado es el mismo libro.
+            similitud (Optional[float]): Parecido con el título interno,
+                entre 0 y 1.
+
+        Raises:
+            ValueError: Si el precio es negativo o la posición no es válida.
+        """
+        if precio_web < 0:
+            raise ValueError("El precio web no puede ser negativo")
+        if posicion < 1:
+            raise ValueError("La posición debe ser mayor o igual a 1")
+        self.__id_precio_web = id_precio_web
+        self.__libro = libro
+        self.__posicion = posicion
+        self.__titulo_web = titulo_web
+        self.__url = url
+        self.__precio_web = precio_web
+        self.__fecha_extraccion = fecha_extraccion
+        self.__isbn_web = isbn_web
+        self.__url_imagen = url_imagen
+        self.__formas_pago = formas_pago
+        self.__descripcion = descripcion
+        self.__coincide = coincide
+        self.__similitud = similitud
+
+    @property
+    def id(self) -> Optional[int]:
+        """Identificador del registro (None si aún no se persistió)."""
+        return self.__id_precio_web
+
+    @property
+    def libro(self) -> Libro:
+        """Libro del catálogo con el que se buscó."""
+        return self.__libro
+
+    @property
+    def posicion(self) -> int:
+        """Posición del resultado en la búsqueda."""
+        return self.__posicion
+
+    @property
+    def titulo_web(self) -> str:
+        """Título informado por el sitio."""
+        return self.__titulo_web
+
+    @property
+    def url(self) -> str:
+        """URL de la ficha del producto."""
+        return self.__url
+
+    @property
+    def precio_web(self) -> float:
+        """Precio en pesos informado por el sitio."""
+        return self.__precio_web
+
+    @property
+    def fecha_extraccion(self) -> datetime:
+        """Momento de la extracción."""
+        return self.__fecha_extraccion
+
+    @property
+    def isbn_web(self) -> Optional[str]:
+        """ISBN informado por el sitio."""
+        return self.__isbn_web
+
+    @property
+    def url_imagen(self) -> Optional[str]:
+        """URL de la imagen del producto."""
+        return self.__url_imagen
+
+    @property
+    def formas_pago(self) -> Optional[str]:
+        """Formas de pago, como texto JSON."""
+        return self.__formas_pago
+
+    @property
+    def descripcion(self) -> Optional[str]:
+        """Descripción detallada del producto."""
+        return self.__descripcion
+
+    @property
+    def coincide(self) -> bool:
+        """Indica si el resultado es el mismo libro del catálogo."""
+        return self.__coincide
+
+    @property
+    def similitud(self) -> Optional[float]:
+        """Parecido con el título interno, entre 0 y 1."""
+        return self.__similitud
+
+    def __repr__(self) -> str:
+        """Devuelve una representación técnica del precio web."""
+        return (
+            f"PrecioWeb(libro={self.__libro.id}, "
+            f"precio_web={self.__precio_web}, coincide={self.__coincide})"
         )

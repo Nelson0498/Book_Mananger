@@ -1,5 +1,15 @@
 # Sprint 3
 
+[Ejercicio 03]
+- Proyecto Scrapy en `scraper/` con el spider `CuspideSpider`: busca por título cada libro del catálogo en Cúspide (`/?s=<título>&post_type=product`) y visita los 10 primeros resultados; si la búsqueda redirige a una ficha, la procesa como resultado 1.
+- Extracción de precio (con respaldo en el JSON-LD), URL de la imagen, formas de pago con su precio, descripción detallada (sección de descripción, tabla de especificaciones o JSON-LD), ISBN y título.
+- `LibroWebItem` y `LibroWebLoader` con procesadores de entrada y salida (`limpiar_precio` convierte `"$ 38.999,00"` en `38999.0`).
+- Pipelines: `ValidacionPipeline` descarta items sin precio o URL, `CoincidenciaPipeline` marca el mismo libro por ISBN o por similitud de título (≥ 75 %) y `PersistenciaPipeline` guarda en la base de datos.
+- Configuración responsable: `ROBOTSTXT_OBEY`, `User-Agent` propio, `DOWNLOAD_DELAY = 1` y `AUTOTHROTTLE`.
+- Nueva tabla `precios_web` (`PrecioWebModel`), entidad `PrecioWeb` y `RepositorioPrecioWeb` (`crear`, `leer_por_libro`, `leer_desde`, `leer_ultima_extraccion`). Se agrega la columna `similitud` para poder elegir la mejor coincidencia de cada libro.
+- `ServicioScraping.ejecutar()` ejecuta Scrapy en un subproceso (el reactor de Twisted no se puede reiniciar en el mismo proceso) y devuelve un `ResultadoScraping`.
+- `requirements.txt` pide `scrapy>=2.13`, versión desde la que los pipelines no reciben el spider por parámetro.
+
 [Ejercicio 02]
 - Reescritura de `preload_data/preload_data.py`: ya no usa repositorios CSV, ahora carga los datos desde archivos `.sql`.
 - Nueva función `cargar_datos_desde_sql(conexion, ruta_sql)`: ejecuta las sentencias de un script en una transacción, separándolas por `;` fuera de comillas e ignorando comentarios; rechaza las sentencias de estructura (`CREATE`, `ALTER`, `DROP`, `TRUNCATE`).

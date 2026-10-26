@@ -165,6 +165,32 @@ main(import_default_data=False)
 | `True` (por defecto) | Asegura el esquema y carga los datos iniciales desde los scripts `.sql`. |
 | `False` | No carga ningún dato: solo asegura que las tablas existan. |
 
+## Scraper de Cúspide (Scrapy)
+
+El proyecto Scrapy vive en `src/book_manager/scraper/` y contiene el spider
+`CuspideSpider` (`name = "cuspide"`), el item `LibroWebItem`, el loader
+`LibroWebLoader` y tres pipelines (validación, coincidencia y persistencia).
+
+- **Qué busca:** solo los libros del catálogo propio. Por cada título se hace
+  una búsqueda en Cúspide y se visitan los **10 primeros resultados**.
+- **Qué obtiene:** precio, URL de la imagen, formas de pago con su precio y
+  descripción detallada (más título, ISBN y URL de la ficha).
+- **Dónde guarda:** en la tabla `precios_web`, sin borrar las extracciones
+  anteriores. El pipeline de coincidencia marca como `coincide` los resultados
+  cuyo ISBN es igual al interno o cuyo título se parece al menos un 75 %.
+- **Cortesía con el sitio:** respeta `robots.txt`, se identifica con un
+  `User-Agent` propio y limita la velocidad (`DOWNLOAD_DELAY = 1`).
+
+La forma habitual de ejecutarlo es desde el menú (opción 12), que lanza Scrapy
+en un subproceso. También puede correrse a mano; `DATABASE_URL` debe estar
+definida y `libros.json` contiene `[{"id": 1, "titulo": "...", "isbn": "..."}]`:
+
+```bash
+cd src/book_manager/scraper
+export PYTHONPATH=../..:.      # En Windows PowerShell: $env:PYTHONPATH = "../..;."
+python -m scrapy crawl cuspide -a libros=libros.json
+```
+
 ## Reglas de negocio
 
 - **Precio en pesos obligatorio:** todo libro tiene un precio en ARS; no se puede
