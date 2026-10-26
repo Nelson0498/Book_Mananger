@@ -45,6 +45,7 @@ from book_manager.services.services import (
     ServicioLibro,
     ServicioMoneda,
     ServicioPrecio,
+    ServicioReportes,
     ServicioScraping,
     ServicioStock,
     ServicioTipoCotizacion,
@@ -144,6 +145,7 @@ class Consola:
         svc_libro: ServicioLibro,
         svc_cotizacion: ServicioCotizacionDolar,
         svc_scraping: ServicioScraping,
+        svc_reportes: ServicioReportes,
     ) -> None:
         """Crea la consola con los servicios que utiliza.
 
@@ -159,6 +161,7 @@ class Consola:
             svc_cotizacion (ServicioCotizacionDolar): Servicio de
                 cotizaciones del dólar.
             svc_scraping (ServicioScraping): Servicio de scraping y alertas.
+            svc_reportes (ServicioReportes): Servicio de reportes Excel.
         """
         self._svc_genero = svc_genero
         self._svc_editorial = svc_editorial
@@ -169,6 +172,7 @@ class Consola:
         self._svc_libro = svc_libro
         self._svc_cotizacion = svc_cotizacion
         self._svc_scraping = svc_scraping
+        self._svc_reportes = svc_reportes
 
     # ==================================================================
     # Menú principal
@@ -1328,3 +1332,9 @@ class Consola:
         print(f"  Coincidencias:        {resultado.coincidencias}")
         print(f"  Alertas (>= {umbral:g} %): {resultado.alertas}")
         self._ofrecer_descarga(resultado.ruta_alertas)
+
+    def _generar_reporte_excel(self) -> None:
+        """Genera el reporte Excel de precios y ofrece descargarlo."""
+        print("\n  --- Generar Reporte Excel ---")
+        ruta = self._svc_reportes.generar_reporte_excel()
+        self._ofrecer_descarga(ruta)

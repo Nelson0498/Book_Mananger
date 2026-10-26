@@ -17,6 +17,9 @@ import urllib.error
 import urllib.request
 from typing import Any, Dict, List, NamedTuple, Optional, Tuple
 
+import pandas as pd
+from openpyxl.utils import get_column_letter
+
 from book_manager.entities.entities import (
     CotizacionDolar,
     Editorial,
@@ -1763,4 +1766,72 @@ class ServicioScraping(_ComparadorPrecios):
             raise ErrorServicio(
                 f"El scraper terminó con error ({proceso.returncode}):\n"
                 f"{detalle}"
+            )
+
+
+# ---------------------------------------------------------------------------
+# ServicioReportes
+# ---------------------------------------------------------------------------
+
+# Columnas del reporte Excel, en orden.
+COLUMNAS_REPORTE = (
+    "Libro", "Precio interno", "Precio web", "Diferencia",
+    "Fecha de extracción",
+)
+
+
+class ServicioReportes(_ComparadorPrecios):
+    """Genera los reportes en Excel a partir de los precios extraídos."""
+
+    def generar_reporte_excel(self) -> str:
+        """Genera el reporte Excel que compara el precio interno con el web.
+
+        Tiene una fila por cada libro con coincidencia en la última
+        extracción. Si todavía no hay extracciones, el archivo se genera
+        solo con los encabezados.
+
+        Returns:
+            str: Ruta absoluta del archivo
+            `reportes/reporte_precios_YYYYMMDD_HHMMSS.xlsx`.
+        """
+        filas = [
+            {
+                "Libro": comparacion.libro.titulo,
+                "Precio interno": comparacion.precio_interno,
+                "Precio web": comparacion.precio_web,
+                "Diferencia": comparacion.diferencia,
+                "Fecha de extracción": (
+                    f"{comparacion.fecha_extraccion:%Y-%m-%d %H:%M}"
+                ),
+            }
+            for comparacion in self._comparar_precios()
+        ]
+        tabla = pd.DataFrame(filas, columns=list(COLUMNAS_REPORTE))
+
+        os.makedirs(CARPETA_REPORTES, exist_ok=True)
+        ruta = os.path.abspath(os.path.join(
+            CARPETA_REPORTES,
+            f"reporte_precios_{datetime.datetime.now():%Y%m%d_%H%M%S}.xlsx",
+        ))
+
+        with pd.ExcelWriter(ruta, engine="openpyxl") as escritor:
+            tabla.to_excel(escritor, index=False, sheet_name="Precios")
+            self._ajustar_anchos(escritor.sheets["Precios"], tabla)
+
+        return ruta
+
+    @staticmethod
+    def _ajustar_anchos(hoja: Any, tabla: pd.DataFrame) -> None:
+        """Ajusta el ancho de cada columna al de su contenido más largo.
+
+        Args:
+            hoja (Any): Hoja de openpyxl a ajustar.
+            tabla (pd.DataFrame): Datos escritos en la hoja.
+        """
+        for indice, columna in enumerate(tabla.columns, start=1):
+            largo = max(
+                [len(str(columna))] + [len(str(v)) for v in tabla[columna]]
+            )
+            hoja.column_dimensions[get_column_letter(indice)].width = (
+                largo + 2
             )

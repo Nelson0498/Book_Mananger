@@ -1,5 +1,11 @@
 # Sprint 3
 
+[Ejercicio 05]
+- Nuevo `ServicioReportes.generar_reporte_excel()`: arma un `DataFrame` de pandas y lo escribe con `to_excel(engine="openpyxl")` en `reportes/reporte_precios_YYYYMMDD_HHMMSS.xlsx`.
+- Columnas: `Libro`, `Precio interno`, `Precio web`, `Diferencia` y `Fecha de extracción` (formato `AAAA-MM-DD HH:MM`), con una fila por cada libro con coincidencia en la última extracción. Se ajusta el ancho de las columnas con openpyxl.
+- El cálculo del precio interno y de la diferencia se comparte con las alertas del Ejercicio 04 mediante la clase base `_ComparadorPrecios` y su método `_comparar_precios()`, que devuelve una lista de `ComparacionPrecio`.
+- La consola ofrece generar el reporte y descargarlo cuando se ejecuta en Colab.
+
 [Ejercicio 04]
 - Comparación del precio interno (pesos; si el libro no tiene, se convierte el de dólares con la cotización Oficial) con el precio web de la mejor coincidencia de cada libro: la de mayor similitud de título y, ante un empate, la primera de la búsqueda.
 - `ServicioScraping.generar_alertas(umbral_pct, fecha)`: escribe `reportes/alertas_YYYYMMDD_HHMMSS.csv` con `libro_id`, `isbn`, `titulo`, `precio_interno`, `precio_web`, `diferencia`, `diferencia_pct`, `tipo_alerta` (`MAS_CARO_WEB` o `MAS_BARATO_WEB`), `url` y `fecha_extraccion`.

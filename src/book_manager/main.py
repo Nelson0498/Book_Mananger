@@ -30,6 +30,7 @@ from book_manager.services.services import (
     ServicioLibro,
     ServicioMoneda,
     ServicioPrecio,
+    ServicioReportes,
     ServicioScraping,
     ServicioStock,
     ServicioTipoCotizacion,
@@ -107,6 +108,7 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
     svc_scraping = ServicioScraping(
         repo_libro, repo_precio_web, svc_cotizacion,
     )
+    svc_reportes = ServicioReportes(repo_precio_web, svc_cotizacion)
 
     # ------------------------------------------------------------------
     # 4. Consola
@@ -121,6 +123,7 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
         svc_libro=svc_libro,
         svc_cotizacion=svc_cotizacion,
         svc_scraping=svc_scraping,
+        svc_reportes=svc_reportes,
     )
 
     consola.ejecutar()
