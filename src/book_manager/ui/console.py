@@ -45,10 +45,17 @@ from book_manager.services.services import (
     ServicioLibro,
     ServicioMoneda,
     ServicioPrecio,
+    ServicioScraping,
     ServicioStock,
     ServicioTipoCotizacion,
     TIPO_COTIZACION_OFICIAL,
 )
+
+# En Google Colab los archivos generados se pueden descargar al equipo.
+try:
+    from google.colab import files as archivos_colab
+except ImportError:
+    archivos_colab = None
 
 
 # ---------------------------------------------------------------------------
@@ -136,6 +143,7 @@ class Consola:
         svc_stock: ServicioStock,
         svc_libro: ServicioLibro,
         svc_cotizacion: ServicioCotizacionDolar,
+        svc_scraping: ServicioScraping,
     ) -> None:
         """Crea la consola con los servicios que utiliza.
 
@@ -150,6 +158,7 @@ class Consola:
             svc_libro (ServicioLibro): Servicio de libros.
             svc_cotizacion (ServicioCotizacionDolar): Servicio de
                 cotizaciones del dólar.
+            svc_scraping (ServicioScraping): Servicio de scraping y alertas.
         """
         self._svc_genero = svc_genero
         self._svc_editorial = svc_editorial
@@ -159,6 +168,7 @@ class Consola:
         self._svc_stock = svc_stock
         self._svc_libro = svc_libro
         self._svc_cotizacion = svc_cotizacion
+        self._svc_scraping = svc_scraping
 
     # ==================================================================
     # Menú principal
@@ -1272,3 +1282,49 @@ class Consola:
         print(f"  USD valuado con {cotizacion.tipo.nombre} "
               f"(venta {cotizacion.valor_venta:.2f}).")
         print("  Las monedas sin cotización se exportan vacías.")
+
+    # ==================================================================
+    # Scraping de la competencia
+    # ==================================================================
+
+    @staticmethod
+    def _ofrecer_descarga(ruta: str) -> None:
+        """Muestra la ruta de un archivo y ofrece descargarlo en Colab.
+
+        Args:
+            ruta (str): Ruta del archivo generado.
+        """
+        print(f"\n  Archivo generado: {os.path.abspath(ruta)}")
+        if archivos_colab is None:
+            return
+        if pedir_opcion("  ¿Descargar el archivo? (s/n): ", ["s", "n"]) == "s":
+            archivos_colab.download(ruta)
+
+    def _pedir_umbral(self) -> float:
+        """Pide la diferencia de precio, en %, que dispara una alerta.
+
+        Returns:
+            float: Porcentaje mayor que cero.
+        """
+        while True:
+            umbral = pedir_float(
+                "  Diferencia de precio que genera alerta (en %): "
+            )
+            if umbral > 0:
+                return umbral
+            print("  Error: el porcentaje debe ser mayor que cero.")
+
+    def _ejecutar_scraping(self) -> None:
+        """Pide el umbral, ejecuta el scraper y muestra el resumen."""
+        print("\n  --- Ejecutar Scraping (Cúspide) ---")
+        umbral = self._pedir_umbral()
+
+        print("\n  Buscando los libros del catálogo en Cúspide."
+              " Puede demorar unos minutos...")
+        resultado = self._svc_scraping.ejecutar(umbral)
+
+        print(f"\n  Libros buscados:      {resultado.libros_buscados}")
+        print(f"  Resultados guardados: {resultado.resultados}")
+        print(f"  Coincidencias:        {resultado.coincidencias}")
+        print(f"  Alertas (>= {umbral:g} %): {resultado.alertas}")
+        self._ofrecer_descarga(resultado.ruta_alertas)

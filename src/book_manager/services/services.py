@@ -6,6 +6,7 @@ involucran a más de una entidad (por ejemplo, crear un Libro implica
 crear también sus Precios y su Stock asociados).
 """
 
+import csv
 import datetime
 import json
 import os
@@ -23,6 +24,7 @@ from book_manager.entities.entities import (
     Libro,
     Moneda,
     Precio,
+    PrecioWeb,
     Stock,
     TipoCotizacion,
 )
@@ -1432,6 +1434,28 @@ class ServicioLibro:
 # ServicioScraping
 # ---------------------------------------------------------------------------
 
+class ComparacionPrecio(NamedTuple):
+    """Comparación del precio interno de un libro con el de la web.
+
+    Attributes:
+        libro (Libro): Libro del catálogo.
+        precio_interno (float): Precio propio en pesos.
+        precio_web (float): Precio en pesos informado por Cúspide.
+        diferencia (float): `precio_web - precio_interno`.
+        diferencia_pct (float): Diferencia como porcentaje del precio propio.
+        url (str): URL de la ficha en Cúspide.
+        fecha_extraccion (datetime.datetime): Momento de la extracción.
+    """
+
+    libro: Libro
+    precio_interno: float
+    precio_web: float
+    diferencia: float
+    diferencia_pct: float
+    url: str
+    fecha_extraccion: datetime.datetime
+
+
 class ResultadoScraping(NamedTuple):
     """Resumen de una ejecución del scraper.
 
@@ -1439,14 +1463,116 @@ class ResultadoScraping(NamedTuple):
         libros_buscados (int): Libros del catálogo que se buscaron.
         resultados (int): Resultados de Cúspide guardados en la ejecución.
         coincidencias (int): Resultados que coinciden con un libro propio.
+        alertas (int): Libros cuya diferencia de precio supera el umbral.
+        ruta_alertas (str): Ruta del CSV de alertas generado.
     """
 
     libros_buscados: int
     resultados: int
     coincidencias: int
+    alertas: int
+    ruta_alertas: str
 
 
-class ServicioScraping:
+# Columnas del archivo CSV de alertas, en orden.
+COLUMNAS_ALERTAS = (
+    "libro_id", "isbn", "titulo", "precio_interno", "precio_web",
+    "diferencia", "diferencia_pct", "tipo_alerta", "url",
+    "fecha_extraccion",
+)
+
+
+class _ComparadorPrecios:
+    """Base de los servicios que comparan el precio interno con el web."""
+
+    def __init__(self, repositorio_precio_web: RepositorioPrecioWeb,
+                 servicio_cotizacion: ServicioCotizacionDolar) -> None:
+        """Crea el comparador.
+
+        Args:
+            repositorio_precio_web (RepositorioPrecioWeb): Repositorio de los
+                precios obtenidos de la web.
+            servicio_cotizacion (ServicioCotizacionDolar): Servicio usado
+                para convertir dólares a pesos si hiciera falta.
+        """
+        self._repositorio_precio_web = repositorio_precio_web
+        self._servicio_cotizacion = servicio_cotizacion
+
+    def _precio_interno(self, libro: Libro) -> Optional[float]:
+        """Devuelve el precio propio del libro en pesos.
+
+        Si el libro no tiene precio en pesos se convierte el de dólares con
+        el valor de venta de la cotización Oficial vigente.
+
+        Args:
+            libro (Libro): Libro a valuar.
+
+        Returns:
+            Optional[float]: El precio en pesos, o None si no hay forma de
+            calcularlo.
+        """
+        precio_ars = libro.precio_en(MONEDA_BASE)
+        if precio_ars is not None:
+            return precio_ars.valor
+
+        precio_usd = libro.precio_en("USD")
+        if precio_usd is None:
+            return None
+        try:
+            oficial = self._servicio_cotizacion.obtener_vigente_por_nombre(
+                TIPO_COTIZACION_OFICIAL
+            )
+        except EntidadNoEncontradaError:
+            return None
+        return round(precio_usd.valor * oficial.valor_venta, 2)
+
+    def _mejores_coincidencias(self) -> List[PrecioWeb]:
+        """Elige la mejor coincidencia de la última extracción de cada libro.
+
+        La mejor es la de mayor similitud de título; ante un empate gana la
+        que apareció primero en la búsqueda.
+
+        Returns:
+            List[PrecioWeb]: Un precio web por libro, ordenado por libro.
+        """
+        mejores: Dict[int, PrecioWeb] = {}
+        for precio in self._repositorio_precio_web.leer_ultima_extraccion():
+            actual = mejores.get(precio.libro.id)
+            if actual is None or (
+                (precio.similitud or 0.0, -precio.posicion)
+                > (actual.similitud or 0.0, -actual.posicion)
+            ):
+                mejores[precio.libro.id] = precio
+        return [mejores[clave] for clave in sorted(mejores)]
+
+    def _comparar_precios(self) -> List[ComparacionPrecio]:
+        """Compara el precio interno con el web de cada libro coincidente.
+
+        Se omiten los libros sin precio interno calculable o con precio
+        interno cero, porque la diferencia porcentual no estaría definida.
+
+        Returns:
+            List[ComparacionPrecio]: Una comparación por libro.
+        """
+        comparaciones = []
+        for web in self._mejores_coincidencias():
+            interno = self._precio_interno(web.libro)
+            if not interno:
+                continue
+            diferencia = round(web.precio_web - interno, 2)
+            comparaciones.append(ComparacionPrecio(
+                libro=web.libro,
+                precio_interno=interno,
+                precio_web=web.precio_web,
+                diferencia=diferencia,
+                diferencia_pct=round(diferencia / interno * 100, 2),
+                url=web.url,
+                fecha_extraccion=web.fecha_extraccion,
+            ))
+        return comparaciones
+
+
+class ServicioScraping(_ComparadorPrecios):
     """Ejecuta el scraper de Cúspide para los libros del catálogo.
 
     Scrapy se ejecuta en un subproceso: el reactor de Twisted no puede
@@ -1456,27 +1582,37 @@ class ServicioScraping:
     """
 
     def __init__(self, repositorio_libro: RepositorioLibro,
-                 repositorio_precio_web: RepositorioPrecioWeb) -> None:
+                 repositorio_precio_web: RepositorioPrecioWeb,
+                 servicio_cotizacion: ServicioCotizacionDolar) -> None:
         """Crea el servicio.
 
         Args:
             repositorio_libro (RepositorioLibro): Repositorio de libros.
             repositorio_precio_web (RepositorioPrecioWeb): Repositorio de los
                 precios obtenidos de la web.
+            servicio_cotizacion (ServicioCotizacionDolar): Servicio de
+                cotizaciones, para valuar en pesos los libros sin precio ARS.
         """
+        super().__init__(repositorio_precio_web, servicio_cotizacion)
         self._repositorio_libro = repositorio_libro
-        self._repositorio_precio_web = repositorio_precio_web
 
-    def ejecutar(self) -> ResultadoScraping:
-        """Busca en Cúspide cada libro del catálogo y guarda los precios.
+    def ejecutar(self, umbral_pct: float) -> ResultadoScraping:
+        """Busca en Cúspide cada libro del catálogo y genera las alertas.
+
+        Args:
+            umbral_pct (float): Diferencia mínima de precio, en porcentaje,
+                para que un libro genere una alerta.
 
         Returns:
-            ResultadoScraping: Resumen de la ejecución.
+            ResultadoScraping: Resumen de la ejecución, con la ruta del CSV
+            de alertas (que se genera siempre, aunque no haya alertas).
 
         Raises:
-            OperacionInvalidaError: Si el catálogo no tiene libros.
+            OperacionInvalidaError: Si el umbral no es positivo o el
+                catálogo no tiene libros.
             ErrorServicio: Si el scraper termina con error.
         """
+        self._validar_umbral(umbral_pct)
         libros = self._repositorio_libro.leer_todos()
         if not libros:
             raise OperacionInvalidaError(
@@ -1487,11 +1623,105 @@ class ServicioScraping:
         self._ejecutar_spider(libros)
         extraidos = self._repositorio_precio_web.leer_desde(inicio)
 
+        alertas = self._calcular_alertas(umbral_pct)
+        ruta = self._escribir_alertas(alertas, datetime.datetime.now())
+
         return ResultadoScraping(
             libros_buscados=len(libros),
             resultados=len(extraidos),
             coincidencias=sum(1 for p in extraidos if p.coincide),
+            alertas=len(alertas),
+            ruta_alertas=ruta,
         )
+
+    def generar_alertas(self, umbral_pct: float,
+                        fecha: datetime.datetime) -> str:
+        """Genera el CSV de alertas con los últimos precios extraídos.
+
+        Args:
+            umbral_pct (float): Diferencia mínima de precio, en porcentaje.
+            fecha (datetime.datetime): Momento que da nombre al archivo.
+
+        Returns:
+            str: Ruta del archivo `reportes/alertas_YYYYMMDD_HHMMSS.csv`.
+
+        Raises:
+            OperacionInvalidaError: Si el umbral no es positivo.
+        """
+        self._validar_umbral(umbral_pct)
+        return self._escribir_alertas(
+            self._calcular_alertas(umbral_pct), fecha
+        )
+
+    @staticmethod
+    def _validar_umbral(umbral_pct: float) -> None:
+        """Valida que el umbral sea un porcentaje positivo.
+
+        Raises:
+            OperacionInvalidaError: Si el umbral no es mayor que cero.
+        """
+        if umbral_pct <= 0:
+            raise OperacionInvalidaError(
+                "El umbral de diferencia debe ser mayor que cero"
+            )
+
+    def _calcular_alertas(
+        self, umbral_pct: float
+    ) -> List[ComparacionPrecio]:
+        """Filtra las comparaciones cuya diferencia alcanza el umbral.
+
+        Args:
+            umbral_pct (float): Diferencia mínima de precio, en porcentaje.
+
+        Returns:
+            List[ComparacionPrecio]: Comparaciones que generan alerta.
+        """
+        return [
+            comparacion for comparacion in self._comparar_precios()
+            if abs(comparacion.diferencia_pct) >= umbral_pct
+        ]
+
+    @staticmethod
+    def _escribir_alertas(alertas: List[ComparacionPrecio],
+                          fecha: datetime.datetime) -> str:
+        """Escribe el CSV de alertas en la carpeta de reportes.
+
+        Args:
+            alertas (List[ComparacionPrecio]): Alertas a escribir; puede
+                estar vacía y entonces solo se escribe el encabezado.
+            fecha (datetime.datetime): Momento que da nombre al archivo.
+
+        Returns:
+            str: Ruta absoluta del archivo generado.
+        """
+        os.makedirs(CARPETA_REPORTES, exist_ok=True)
+        ruta = os.path.abspath(os.path.join(
+            CARPETA_REPORTES, f"alertas_{fecha:%Y%m%d_%H%M%S}.csv"
+        ))
+
+        with open(ruta, mode="w", newline="", encoding="utf-8") as archivo:
+            escritor = csv.DictWriter(archivo, fieldnames=COLUMNAS_ALERTAS)
+            escritor.writeheader()
+            for alerta in alertas:
+                escritor.writerow({
+                    "libro_id": alerta.libro.id_libro,
+                    "isbn": alerta.libro.isbn,
+                    "titulo": alerta.libro.titulo,
+                    "precio_interno": f"{alerta.precio_interno:.2f}",
+                    "precio_web": f"{alerta.precio_web:.2f}",
+                    "diferencia": f"{alerta.diferencia:.2f}",
+                    "diferencia_pct": f"{alerta.diferencia_pct:.2f}",
+                    "tipo_alerta": (
+                        "MAS_CARO_WEB" if alerta.diferencia > 0
+                        else "MAS_BARATO_WEB"
+                    ),
+                    "url": alerta.url,
+                    "fecha_extraccion": (
+                        f"{alerta.fecha_extraccion:%Y-%m-%d %H:%M:%S}"
+                    ),
+                })
+
+        return ruta
 
     @staticmethod
     def _ejecutar_spider(libros: List[Libro]) -> None:

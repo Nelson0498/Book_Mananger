@@ -19,6 +19,7 @@ from book_manager.repositories.repositories import (
     RepositorioLibro,
     RepositorioMoneda,
     RepositorioPrecio,
+    RepositorioPrecioWeb,
     RepositorioStock,
     RepositorioTipoCotizacion,
 )
@@ -29,6 +30,7 @@ from book_manager.services.services import (
     ServicioLibro,
     ServicioMoneda,
     ServicioPrecio,
+    ServicioScraping,
     ServicioStock,
     ServicioTipoCotizacion,
 )
@@ -82,6 +84,7 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
     repo_stock = RepositorioStock(conexion)
     repo_libro = RepositorioLibro(conexion)
     repo_cotizacion = RepositorioCotizacionDolar(conexion)
+    repo_precio_web = RepositorioPrecioWeb(conexion)
 
     # ------------------------------------------------------------------
     # 3. Servicios
@@ -101,6 +104,9 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
     svc_cotizacion = ServicioCotizacionDolar(
         repo_cotizacion, repo_tipo_cotizacion,
     )
+    svc_scraping = ServicioScraping(
+        repo_libro, repo_precio_web, svc_cotizacion,
+    )
 
     # ------------------------------------------------------------------
     # 4. Consola
@@ -114,6 +120,7 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
         svc_stock=svc_stock,
         svc_libro=svc_libro,
         svc_cotizacion=svc_cotizacion,
+        svc_scraping=svc_scraping,
     )
 
     consola.ejecutar()

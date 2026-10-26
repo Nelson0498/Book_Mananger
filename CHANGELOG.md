@@ -1,5 +1,12 @@
 # Sprint 3
 
+[Ejercicio 04]
+- Comparación del precio interno (pesos; si el libro no tiene, se convierte el de dólares con la cotización Oficial) con el precio web de la mejor coincidencia de cada libro: la de mayor similitud de título y, ante un empate, la primera de la búsqueda.
+- `ServicioScraping.generar_alertas(umbral_pct, fecha)`: escribe `reportes/alertas_YYYYMMDD_HHMMSS.csv` con `libro_id`, `isbn`, `titulo`, `precio_interno`, `precio_web`, `diferencia`, `diferencia_pct`, `tipo_alerta` (`MAS_CARO_WEB` o `MAS_BARATO_WEB`), `url` y `fecha_extraccion`.
+- Hay alerta cuando la diferencia absoluta alcanza el umbral. El archivo se genera en cada ejecución del scraper, aunque no haya alertas (solo el encabezado).
+- `ServicioScraping.ejecutar(umbral_pct)` pasa a recibir el umbral y devuelve el resumen con la cantidad de alertas y la ruta del CSV.
+- La consola pide el umbral en % (validado con `pedir_float` y mayor que cero) antes de cada scraping, muestra la ruta absoluta del CSV y, si se ejecuta en Colab, ofrece descargarlo con `google.colab.files`.
+
 [Ejercicio 03]
 - Proyecto Scrapy en `scraper/` con el spider `CuspideSpider`: busca por título cada libro del catálogo en Cúspide (`/?s=<título>&post_type=product`) y visita los 10 primeros resultados; si la búsqueda redirige a una ficha, la procesa como resultado 1.
 - Extracción de precio (con respaldo en el JSON-LD), URL de la imagen, formas de pago con su precio, descripción detallada (sección de descripción, tabla de especificaciones o JSON-LD), ISBN y título.
