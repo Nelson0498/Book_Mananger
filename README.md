@@ -158,6 +158,21 @@ from book_manager.main import main
 main(import_default_data=False)
 ```
 
+### Menú principal
+
+| Opción | Acción |
+| --- | --- |
+| 1 a 8 | CRUD de Libros, Géneros, Editoriales, Monedas, Precios, Stock, Tipos de Cotización y Cotizaciones del Dólar. |
+| 9 | Obtener las cotizaciones del dólar por API. |
+| 10 | Lista de precios bimonetaria (pesos y la moneda elegida; para el USD se elige el tipo de cotización). |
+| 11 | Exportar los precios a CSV, con una columna por moneda. |
+| 12 | **Ejecutar scraping de Cúspide:** pide el umbral de diferencia (%), muestra un resumen y genera el CSV de alertas. |
+| 13 | **Generar reporte Excel** con precio interno, precio web y diferencia. |
+| 14 | **Ver historial de auditoría**, con filtro opcional por acción. |
+
+Los archivos generados (`alertas_*.csv`, `precios_*.csv` y `reporte_precios_*.xlsx`)
+se guardan en `src/book_manager/reportes/`; en Colab el menú ofrece descargarlos.
+
 ### Parámetro `import_default_data`
 
 | Valor | Comportamiento |

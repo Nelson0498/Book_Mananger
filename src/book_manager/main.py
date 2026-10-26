@@ -134,6 +134,7 @@ def _ejecutar_sistema(conexion: ConexionDB, import_default_data: bool) -> None:
         svc_cotizacion=svc_cotizacion,
         svc_scraping=svc_scraping,
         svc_reportes=svc_reportes,
+        svc_auditoria=svc_auditoria,
     )
 
     consola.ejecutar()

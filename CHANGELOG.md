@@ -1,5 +1,14 @@
 # Sprint 3
 
+[Ejercicio 07]
+- Nuevas opciones del menú principal: `12. Ejecutar scraping (Cúspide)`, `13. Generar reporte Excel` y `14. Ver historial de auditoría`.
+- La opción 12 pide el umbral de diferencia en %, ejecuta el scraper y muestra el resumen (libros buscados, resultados, coincidencias y alertas) y la ruta del CSV de alertas, que en Colab se puede descargar.
+- La opción 13 genera el reporte Excel y muestra su ruta, con descarga en Colab.
+- La opción 14 pide la cantidad de registros (20 por defecto) y un filtro opcional por acción, y muestra una tabla con fecha, acción y detalles recortados.
+- `Consola` recibe `ServicioScraping`, `ServicioReportes` y `ServicioAuditoria`, armados en `main.py`.
+- Las opciones 9 a 14 comparten un único manejo de errores del menú.
+- Actualización del `README.md` con la sección de uso del menú.
+
 [Ejercicio 06]
 - Nueva tabla `auditorias` (`AuditoriaModel`) con `accion`, `fecha` y `detalles`, la entidad `Auditoria` y el `RepositorioAuditoria` (`crear`, `leer_todos(limite)` y `leer_por_accion`, del más reciente al más antiguo).
 - `ServicioAuditoria` con `registrar`, `listar` y `listar_por_accion`. No se audita a sí mismo.

@@ -39,6 +39,7 @@ from book_manager.services.services import (
     EntidadNoEncontradaError,
     ErrorServicio,
     MONEDA_BASE,
+    ServicioAuditoria,
     ServicioCotizacionDolar,
     ServicioEditorial,
     ServicioGenero,
@@ -146,6 +147,7 @@ class Consola:
         svc_cotizacion: ServicioCotizacionDolar,
         svc_scraping: ServicioScraping,
         svc_reportes: ServicioReportes,
+        svc_auditoria: ServicioAuditoria,
     ) -> None:
         """Crea la consola con los servicios que utiliza.
 
@@ -162,6 +164,7 @@ class Consola:
                 cotizaciones del dólar.
             svc_scraping (ServicioScraping): Servicio de scraping y alertas.
             svc_reportes (ServicioReportes): Servicio de reportes Excel.
+            svc_auditoria (ServicioAuditoria): Servicio de auditoría.
         """
         self._svc_genero = svc_genero
         self._svc_editorial = svc_editorial
@@ -173,6 +176,7 @@ class Consola:
         self._svc_cotizacion = svc_cotizacion
         self._svc_scraping = svc_scraping
         self._svc_reportes = svc_reportes
+        self._svc_auditoria = svc_auditoria
 
     # ==================================================================
     # Menú principal
@@ -180,6 +184,14 @@ class Consola:
 
     def ejecutar(self) -> None:
         """Bucle principal del menú."""
+        acciones_reportes = {
+            "9": self._obtener_cotizaciones_api,
+            "10": self._lista_precios_bimonetaria,
+            "11": self._exportar_precios_csv,
+            "12": self._ejecutar_scraping,
+            "13": self._generar_reporte_excel,
+            "14": self._ver_historial_auditoria,
+        }
         while True:
             mostrar_titulo("BOOK MANAGER")
             print("  1. Libros")
@@ -193,11 +205,14 @@ class Consola:
             print("  9. Obtener cotizaciones por API")
             print(" 10. Lista de precios bimonetaria")
             print(" 11. Exportar precios a CSV")
+            print(" 12. Ejecutar scraping (Cúspide)")
+            print(" 13. Generar reporte Excel")
+            print(" 14. Ver historial de auditoría")
             print("  0. Salir")
 
             opcion = pedir_opcion(
                 "\n  Seleccione una opción: ",
-                ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10", "11"],
+                [str(n) for n in range(15)],
             )
 
             if opcion == "1":
@@ -216,14 +231,9 @@ class Consola:
                 self._menu_tipos_cotizacion()
             elif opcion == "8":
                 self._menu_cotizaciones()
-            elif opcion in ("9", "10", "11"):
+            elif opcion in acciones_reportes:
                 try:
-                    if opcion == "9":
-                        self._obtener_cotizaciones_api()
-                    elif opcion == "10":
-                        self._lista_precios_bimonetaria()
-                    else:
-                        self._exportar_precios_csv()
+                    acciones_reportes[opcion]()
                 except (ErrorServicio, ValidationError, ValueError) as e:
                     print(f"\n  Error: {e}")
                 pausar()
@@ -1338,3 +1348,37 @@ class Consola:
         print("\n  --- Generar Reporte Excel ---")
         ruta = self._svc_reportes.generar_reporte_excel()
         self._ofrecer_descarga(ruta)
+
+    # ==================================================================
+    # Auditoría
+    # ==================================================================
+
+    def _ver_historial_auditoria(self) -> None:
+        """Muestra los últimos registros de la auditoría del sistema."""
+        print("\n  --- Historial de Auditoría ---")
+        texto = pedir_texto(
+            "  Cantidad de registros [Enter = 20]: ", permitir_vacio=True
+        )
+        cantidad = int(texto) if texto.isdigit() and int(texto) > 0 else 20
+        accion = pedir_texto_opcional(
+            "  Filtrar por acción (ej: CREAR_LIBRO, Enter = todas): "
+        )
+
+        if accion:
+            registros = self._svc_auditoria.listar_por_accion(
+                accion, cantidad
+            )
+        else:
+            registros = self._svc_auditoria.listar(cantidad)
+
+        if not registros:
+            print("\n  No hay registros de auditoría.")
+            return
+
+        print(f"\n  {'Fecha':<19} | {'Acción':<28} | Detalles")
+        for registro in registros:
+            detalles = (registro.detalles or "").replace("\n", " ")
+            if len(detalles) > 60:
+                detalles = detalles[:57] + "..."
+            print(f"  {registro.fecha:%Y-%m-%d %H:%M:%S} | "
+                  f"{registro.accion:<28} | {detalles}")
